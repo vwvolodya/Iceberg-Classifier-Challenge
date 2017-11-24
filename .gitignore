@@ -146,4 +146,5 @@ fabric.properties
 pyvenv.cfg
 pip-selfcheck.json
 data/orig/
+.DS_Store
 
