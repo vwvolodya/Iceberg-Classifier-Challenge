@@ -2,6 +2,7 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 from torchvision import transforms
+from skimage import restoration
 from base.dataset import BaseDataset, ToTensor
 
 
@@ -10,7 +11,8 @@ MIN_MAX = {"min1": -45.594448, "min2": -45.655499, "max1": 34.574917, "max2": 20
 
 
 class IcebergDataset(BaseDataset):
-    def __init__(self, path, inference_only=False, transform=None, augment=None, im_dir=None, min_max=MIN_MAX):
+    def __init__(self, path, inference_only=False, transform=None, augment=None, im_dir=None,
+                 min_max=MIN_MAX, top=None):
         self.transform = transform
         self.min_max = min_max
         self.inference_only = inference_only
@@ -18,6 +20,8 @@ class IcebergDataset(BaseDataset):
         if inference_only:
             self.ids = None
         self.data = np.load(path)
+        if top:
+            self.data = self.data[:top, :]
         self.ch1 = self.data[:, 0]
         self.ch2 = self.data[:, 1]
         self.angle = self.data[:, 2]
@@ -49,7 +53,7 @@ class IcebergDataset(BaseDataset):
         return image, mu1, sigma1, mu2, sigma2
 
     def __getitem__(self, idx):
-        image, _, _, _, _ = self._get_image(idx)
+        image, _, _, _, _ = self._get_image(idx, scale=True)
         item = {"inputs": image}
         if self.inference_only:
             y = np.array([0])
@@ -72,15 +76,18 @@ class IcebergDataset(BaseDataset):
         plt.savefig(path)
         plt.clf()
 
-    def vis(self, idx, average=True, scale=False):
+    def vis(self, idx, average=True, scale=False, restore=False):
+        psf = np.ones((5, 5)) / 25
         base_dir = self.im_dir or "./"
         image, mu1, sigma1, mu2, sigma2 = self._get_image(idx, scale=scale)
         label = self.y[idx]
         angle = self.angle[idx]
         if average:
-            path = os.path.join(base_dir, "im_%s_%s.jpg" % (idx, label))
             image = np.mean(image, axis=0)
             mu, sigma = self._get_image_stat(image)
+            path = os.path.join(base_dir, "im_%s_%s_%s.jpg" % (idx, label, "restored" if restore else ""))
+            if restore:
+                image = restoration.unsupervised_wiener(image, psf)[0]
             self._make_heatmap(image, path, label=label, angle=angle, mu=mu, sigma=sigma)
         else:
             path_1 = os.path.join(base_dir, "im_%s_ch1_%s.jpg" % (idx, label))
@@ -97,7 +104,7 @@ if __name__ == "__main__":
     ds = IcebergDataset("../data/folds/train_1.npy", transform=ToTensor(), im_dir="../data/vis")
     for i in range(len(ds)):
         sample = ds[i]
-        ds.vis(i, average=True, scale=False)
+        ds.vis(i, average=True, scale=True, restore=True)
         print(i, sample['inputs'].size(), sample['targets'].size(), sample["targets"].numpy()[0])
         if i == 100:
             break

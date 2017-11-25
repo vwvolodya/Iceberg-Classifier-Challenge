@@ -150,5 +150,6 @@ data/vis/
 .DS_Store
 logs/
 *.npy
+models
 
 

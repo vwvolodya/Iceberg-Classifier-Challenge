@@ -16,6 +16,9 @@ class BaseModel(nn.Module):
             torch.cuda.manual_seed(seed)
         super().__init__()
 
+    def _reset_predictions_cache(self):
+        self._predictions = defaultdict(list)
+
     @abc.abstractmethod
     def forward(self, *args, **kwargs):
         pass
