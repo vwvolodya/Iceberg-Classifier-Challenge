@@ -146,6 +146,7 @@ fabric.properties
 pyvenv.cfg
 pip-selfcheck.json
 data/orig/
+data/vis/
 .DS_Store
 logs/
 *.npy
