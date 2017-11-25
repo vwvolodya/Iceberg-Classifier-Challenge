@@ -27,21 +27,29 @@ class IcebergDataset(BaseDataset):
     def __len__(self):
         return self.data.shape[0]
 
+    @classmethod
+    def _get_image_stat(cls, image):
+        mean_1 = np.mean(image)
+        std_1 = np.std(image)
+        return mean_1, std_1
+
     def _get_image(self, idx, scale=False):
         ch_1 = self.ch1[idx]
         ch_2 = self.ch2[idx]
         ch1_2d = np.reshape(ch_1, (self.width, self.width))
         ch2_2d = np.reshape(ch_2, (self.width, self.width))
+        mu1, sigma1 = self._get_image_stat(ch1_2d)
+        mu2, sigma2 = self._get_image_stat(ch2_2d)
         if scale:
             diff_1 = self.min_max["max1"] - self.min_max["min1"]
             diff_2 = self.min_max["max2"] - self.min_max["min2"]
             ch1_2d = (ch1_2d - self.min_max["min1"]) / diff_1
             ch2_2d = (ch2_2d - self.min_max["min2"]) / diff_2
         image = np.stack((ch1_2d, ch2_2d), axis=0)  # PyTorch uses NCHW ordering
-        return image
+        return image, mu1, sigma1, mu2, sigma2
 
     def __getitem__(self, idx):
-        image = self._get_image(idx)
+        image, _, _, _, _ = self._get_image(idx)
         item = {"inputs": image}
         if self.inference_only:
             y = np.array([0])
@@ -54,37 +62,42 @@ class IcebergDataset(BaseDataset):
         return item
 
     @classmethod
-    def _make_heatmap(cls, image, path, label=None):
+    def _make_heatmap(cls, image, path, label=None, angle=None, **kwargs):
+        string = ""
+        for k, v in kwargs.items():
+            string += str(k) + " " + "{0:.2f}".format(v) + " "
         if label is not None:
-            plt.suptitle("Is iceberg: %s" % str(label))
+            plt.suptitle("%s, angle: %s %s" % (str(label), str(angle), string))
         plt.imshow(image, cmap="jet")
         plt.savefig(path)
         plt.clf()
 
     def vis(self, idx, average=True, scale=False):
         base_dir = self.im_dir or "./"
-        image = self._get_image(idx, scale=scale)
+        image, mu1, sigma1, mu2, sigma2 = self._get_image(idx, scale=scale)
         label = self.y[idx]
+        angle = self.angle[idx]
         if average:
             path = os.path.join(base_dir, "im_%s_%s.jpg" % (idx, label))
             image = np.mean(image, axis=0)
-            self._make_heatmap(image, path, label=label)
+            mu, sigma = self._get_image_stat(image)
+            self._make_heatmap(image, path, label=label, angle=angle, mu=mu, sigma=sigma)
         else:
             path_1 = os.path.join(base_dir, "im_%s_ch1_%s.jpg" % (idx, label))
             path_2 = os.path.join(base_dir, "im_%s_ch2_%s.jpg" % (idx, label))
             image_1 = image[0, :, :]
             image_2 = image[1, :, :]
-            self._make_heatmap(image_1, path_1, label=label)
-            self._make_heatmap(image_2, path_2, label=label)
+            self._make_heatmap(image_1, path_1, label=label, angle=angle, mu1=mu1, sigma1=sigma1)
+            self._make_heatmap(image_2, path_2, label=label, angle=angle, mu2=mu2, sigma2=sigma2)
 
 
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
 
-    ds = IcebergDataset("../data/folds/train_0.npy", transform=ToTensor(), im_dir="../data/vis")
+    ds = IcebergDataset("../data/folds/train_1.npy", transform=ToTensor(), im_dir="../data/vis")
     for i in range(len(ds)):
         sample = ds[i]
-        ds.vis(i, average=False, scale=True)
+        ds.vis(i, average=True, scale=False)
         print(i, sample['inputs'].size(), sample['targets'].size(), sample["targets"].numpy()[0])
         if i == 100:
             break
