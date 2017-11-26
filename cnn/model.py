@@ -44,20 +44,22 @@ class BasicBlock(nn.Module):
 
 class ResNet(BaseModel):
 
-    def __init__(self, block, num_feature_planes, layers, num_classes=1):
+    def __init__(self, block, num_feature_planes, layers, num_classes=1, fold_number=0):
+        self.fold_number = fold_number
         self.inplanes = 32
-        super().__init__()
-        self.conv1 = nn.Conv2d(num_feature_planes, 32, kernel_size=5, stride=2, padding=3, bias=False)
+        super().__init__(best_model_name="./models/best_fold_%s.mdl" % fold_number)
+        self.conv1 = nn.Conv2d(num_feature_planes, 32, kernel_size=3, stride=2, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(32)
         self.elu = nn.ELU(inplace=True)
         self.sigmoid = nn.Sigmoid()
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 32, layers[0])
-        self.layer2 = self._make_layer(block, 64, layers[1], stride=2)
-        self.layer3 = self._make_layer(block, 128, layers[2], stride=2)
+        self.layer2 = self._make_layer(block, 48, layers[1], stride=2)
+        self.layer3 = self._make_layer(block, 64, layers[2], stride=2)
         # self.layer4 = self._make_layer(block, 256, layers[3], stride=2)
         # self.avgpool = nn.AvgPool2d(7, stride=1)
-        self.fc = nn.Linear(128 * 5 * 5, num_classes)
+        self.fc1 = nn.Linear(64 * 5 * 5, 16)
+        self.fc2 = nn.Linear(16, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -96,7 +98,8 @@ class ResNet(BaseModel):
 
         # x = self.avgpool(x)
         x = x.view(x.size(0), -1)
-        x = self.fc(x)
+        x = self.fc1(x)
+        x = self.fc2(x)
         x = self.sigmoid(x)
 
         return x
@@ -126,7 +129,8 @@ class ResNet(BaseModel):
         if predictions_are_classes:
             recall = metrics.recall_score(target_y, pred_y, pos_label=1.0)
             precision = metrics.precision_score(target_y, pred_y, pos_label=1.0)
-            result = {"precision": precision, "recall": recall}
+            accuracy = metrics.accuracy_score(target_y, pred_y)
+            result = {"precision": precision, "recall": recall, "acc": accuracy}
         else:
             fpr, tpr, thresholds = metrics.roc_curve(target_y, pred_y, pos_label=1.0)
             auc = metrics.auc(fpr, tpr)
@@ -184,55 +188,73 @@ class ResNet(BaseModel):
         self._reset_predictions_cache()
         return computed_metrics
 
-    def fit(self, optim, loss_fn, data_loader, validation_data_loader, num_epochs, logger):
+    def fit(self, optim, loss_fn, data_loaders, validation_data_loader, num_epochs, logger):
+        best_loss = float("inf")
         for e in progressbar(range(num_epochs)):
-            iter_per_epoch = len(data_loader)
             self._epoch = e
-            data_iter = iter(data_loader)
-            for i in range(iter_per_epoch):
-                inputs, labels = self._get_inputs(data_iter)
 
-                predictions, classes = self.predict(inputs, return_classes=True)
+            for data_loader in data_loaders:
+                iter_per_epoch = len(data_loader)
+                data_iter = iter(data_loader)
+                for i in range(iter_per_epoch):
+                    inputs, labels = self._get_inputs(data_iter)
 
-                optim.zero_grad()
-                loss = loss_fn(predictions, labels)
-                loss.backward()
-                optim.step()
+                    predictions, classes = self.predict(inputs, return_classes=True)
 
-                self._accumulate_results(self.to_np(labels).squeeze(),
-                                         classes,
-                                         loss=loss.data[0],
-                                         probs=self.to_np(predictions).squeeze())
-            self.evaluate(logger, validation_data_loader, loss_fn, switch_to_eval=True)
-            self.save("./models/clf_%s.mdl" % str(e + 1))
+                    optim.zero_grad()
+                    loss = loss_fn(predictions, labels)
+                    loss.backward()
+                    optim.step()
+
+                    self._accumulate_results(self.to_np(labels).squeeze(),
+                                             classes,
+                                             loss=loss.data[0],
+                                             probs=self.to_np(predictions).squeeze())
+            stats = self.evaluate(logger, validation_data_loader, loss_fn, switch_to_eval=True)
+            is_best = stats["val_loss"] < best_loss
+            best_loss = min(best_loss, stats["val_loss"])
+            self.save("./models/clf_%s_fold_%s.mdl" % (str(e + 1), self.fold_number), optim, is_best)
 
 
 if __name__ == "__main__":
     import torch
     from base.logger import Logger
-    from cnn.dataset import IcebergDataset, ToTensor
+    from cnn.dataset import IcebergDataset, ToTensor, Flip
     from torch.utils.data import DataLoader
+    from torchvision import transforms
 
     top = None
     val_top = None
     train_batch_size = 256
     test_batch_size = 64
 
-    main_logger = Logger("../logs")
+    t1 = ToTensor()
+    t2 = transforms.Compose([Flip(axis=2), ToTensor()])
+    t3 = transforms.Compose([Flip(axis=1), ToTensor()])
+    t4 = transforms.Compose([Flip(axis=2), Flip(axis=1), ToTensor()])
+    t5 = transforms.Compose([Flip(axis=1), Flip(axis=2), ToTensor()])
+    all_tranfrormations = [t1, t2, t3, t4, t5]
 
-    train_ds = IcebergDataset("../data/folds/train_0.npy", transform=ToTensor(), top=top)
-    val_ds = IcebergDataset("../data/folds/test_0.npy", transform=ToTensor(), top=top)
+    folds = range(4)
 
-    net = ResNet(BasicBlock, 2, [2, 2, 2, 2], num_classes=1)
-    net.show_env_info()
     loss_func = nn.BCELoss()
 
-    train_loader = DataLoader(train_ds, batch_size=train_batch_size, num_workers=12, pin_memory=True)
-    val_loader = DataLoader(val_ds, batch_size=test_batch_size, num_workers=6, pin_memory=True)
+    for fold in folds:
+        main_logger = Logger("../logs/%s" % fold)
+        train_sets = [IcebergDataset("../data/folds/train_%s.npy" % fold, transform=t, top=top)
+                      for t in all_tranfrormations]
+        val_ds = IcebergDataset("../data/folds/test_%s.npy" % fold, transform=ToTensor(), top=top)
 
-    if torch.cuda.is_available():
-        net.cuda()
-        loss_func.cuda()
+        net = ResNet(BasicBlock, 2, [2, 2, 2, 2], num_classes=1, fold_number=fold)
+        net.show_env_info()
 
-    optim = torch.optim.Adam(net.parameters(), lr=0.0002)
-    net.fit(optim, loss_func, train_loader, val_loader, 150, logger=main_logger)
+        train_loaders = [DataLoader(ds, batch_size=train_batch_size, num_workers=12, pin_memory=True)
+                         for ds in train_sets]
+        val_loader = DataLoader(val_ds, batch_size=test_batch_size, num_workers=6, pin_memory=True)
+
+        if torch.cuda.is_available():
+            net.cuda()
+            loss_func.cuda()
+
+        optim = torch.optim.Adam(net.parameters(), lr=0.0001)
+        net.fit(optim, loss_func, train_loaders, val_loader, 25, logger=main_logger)

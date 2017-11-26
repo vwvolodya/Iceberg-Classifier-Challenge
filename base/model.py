@@ -3,12 +3,14 @@ import sys
 import numpy as np
 import torch
 import torch.nn as nn
+import shutil
 from torch.autograd import Variable
 from collections import defaultdict
 
 
 class BaseModel(nn.Module):
-    def __init__(self, seed=10101):
+    def __init__(self, seed=10101, best_model_name="./models/best.mdl"):
+        self._best_model_name = best_model_name
         self._predictions = defaultdict(list)
         self._epoch = 0
         torch.manual_seed(seed)
@@ -102,18 +104,25 @@ class BaseModel(nn.Module):
         if log_grads:
             self._log_grads(logger)
 
-    def save(self, path):
-        torch.save(self, path)
+    def save(self, path, optimizer, is_best):
+        data = {
+            'epoch': self._epoch + 1,
+            'state_dict': self.state_dict(),
+            'optimizer': optimizer.state_dict(),
+        }
+        torch.save(data, path)
+        if is_best:
+            shutil.copyfile(path, self._best_model_name)
 
-    @classmethod
-    def load(cls, path):
+    def load(self, path):
         """
         Load model
         :param path: string path to file containing model
         :return: instance of this class
         :rtype: BaseModel
         """
-        model = torch.load(path)
-        if isinstance(model, dict):
-            model = model['state_dict']
-        return model
+        checkpoint = torch.load(path)
+        self.load_state_dict(checkpoint['state_dict'])
+        print("Loading model from epoch %s" % checkpoint["epoch"])
+        self.eval()
+        return self

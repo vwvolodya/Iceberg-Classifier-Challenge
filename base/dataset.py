@@ -11,6 +11,12 @@ class BaseDataset(Dataset):
 
 
 class ToTensor:
+    def __init__(self, excluded_keys=("id",)):
+        self.excluded = excluded_keys
+
     def __call__(self, x):
-        result = {k: torch.from_numpy(v).float() for k, v in x.items()}
+        result = {k: torch.from_numpy(v).float() for k, v in x.items() if k not in self.excluded}
+        for k in self.excluded:
+            if k in x.keys():
+                result[k] = x[k]
         return result
