@@ -3,7 +3,6 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 from torchvision import transforms
-from skimage import restoration
 from scipy import ndimage
 from base.dataset import BaseDataset, ToTensor
 
@@ -14,13 +13,30 @@ MU_SIGMA = {"mu1": -20.655831, "mu2": -26.320702, "sigma1": 5.200838, "sigma2": 
 
 
 class Rotate:
-    def __init__(self, angle, size=75):
-        self.size = size
+    def __init__(self, angle):
+        self.standard_angle = angle in [90, 180, 270]
         self.angle = angle
 
     def __call__(self, item):
         image = item["inputs"]
-        image = ndimage.rotate(image, self.angle, axes=(1, 2))
+        plane_1 = image[0, :, :]
+        plane_2 = image[1, :, :]
+        if not self.standard_angle:
+            image_1 = ndimage.rotate(plane_1, self.angle, axes=(1, 0), mode="nearest", reshape=False)
+            image_2 = ndimage.rotate(plane_2, self.angle, axes=(1, 0), mode="nearest", reshape=False)
+        else:
+            if self.angle == 90:
+                image_1 = np.rot90(plane_1)
+                image_2 = np.rot90(plane_2)
+            elif self.angle == 180:
+                image_1 = np.rot90(np.rot90(plane_1))
+                image_2 = np.rot90(np.rot90(plane_2))
+            elif self.angle == 270:
+                image_1 = np.rot90(np.rot90(np.rot90(plane_1)))
+                image_2 = np.rot90(np.rot90(np.rot90(plane_2)))
+            else:
+                raise Exception("Invalid angle!")
+        image = np.stack((image_1, image_2), axis=0)
         item["inputs"] = image
         return item
 
@@ -37,8 +53,9 @@ class Flip:
 
 class IcebergDataset(BaseDataset):
     def __init__(self, path, inference_only=False, transform=None, im_dir=None,
-                 min_max=MIN_MAX, top=None, mu_sigma=MU_SIGMA):
+                 min_max=MIN_MAX, top=None, mu_sigma=MU_SIGMA, denoise=False):
         self.transform = transform
+        self.denoise = denoise
         self.min_max = min_max
         self.mu_sigma = mu_sigma
         self.inference_only = inference_only
@@ -56,6 +73,7 @@ class IcebergDataset(BaseDataset):
         self.ch1 = self.data[:, 0]
         self.ch2 = self.data[:, 1]
         self.angle = self.data[:, 2]
+        print("Ds length ", self.data.shape[0])
 
     def __len__(self):
         return self.data.shape[0]
@@ -71,8 +89,9 @@ class IcebergDataset(BaseDataset):
         ch_2 = self.ch2[idx]
         ch1_2d = np.reshape(ch_1, (self.width, self.width))
         ch2_2d = np.reshape(ch_2, (self.width, self.width))
-        ch1_2d = self._denoise(ch1_2d)
-        ch2_2d = self._denoise(ch2_2d)
+        if self.denoise:
+            ch1_2d = self._denoise(ch1_2d)
+            ch2_2d = self._denoise(ch2_2d)
         mu1, sigma1 = self._get_image_stat(ch1_2d)
         mu2, sigma2 = self._get_image_stat(ch2_2d)
         if scale:
@@ -114,6 +133,7 @@ class IcebergDataset(BaseDataset):
     def _denoise(self, image):
         # new_image = ndimage.median_filter(image, 3)
         new_image = ndimage.gaussian_filter(image, 2)
+        # new_image = ndimage.sobel(image, 2)
         return new_image
 
     def vis(self, idx, average=True, scale=False, denoise=False, prefix=""):
@@ -147,14 +167,14 @@ if __name__ == "__main__":
         t3 = transforms.Compose([Flip(axis=1), ToTensor()])
         t4 = transforms.Compose([Flip(axis=2), Flip(axis=1), ToTensor()])
         t5 = transforms.Compose([Flip(axis=1), Flip(axis=2), ToTensor()])
-        t6 = transforms.Compose([Rotate(45), ToTensor()])
+        t6 = transforms.Compose([Rotate(30), ToTensor()])
 
         ds1 = IcebergDataset("../data/folds/train_1.npy", transform=t6, im_dir="../data/vis")
         for i in range(len(ds1)):
             sample = ds1[i]
-            ds1.vis(i, average=False, scale=True, denoise=False, prefix="rot_45_")
+            ds1.vis(i, average=False, scale=True, denoise=False, prefix="rot_90_")
             print(i, sample['inputs'].size(), sample['targets'].size(), sample["targets"].numpy()[0])
-            if i == 50:
+            if i == 10:
                 break
 
         dataloader = DataLoader(ds1, batch_size=4, shuffle=True, num_workers=1, pin_memory=True)

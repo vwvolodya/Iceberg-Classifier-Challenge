@@ -3,11 +3,11 @@ import numpy as np
 from sklearn.model_selection import StratifiedKFold
 
 
-def split(path):
+def split(path, n_splits=5):
     data = pd.read_json(path)
     np_data = data[["band_1", "band_2", "inc_angle", "is_iceberg"]].as_matrix()
     y = data["is_iceberg"].as_matrix()
-    stk = StratifiedKFold(n_splits=4, random_state=101)
+    stk = StratifiedKFold(n_splits=n_splits, random_state=59)
     result = []
     for train, test in stk.split(np_data, y):
         fold_train = np_data[train, :]
