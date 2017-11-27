@@ -12,17 +12,16 @@ def infer(path, num_folds):
     loader = DataLoader(ds, 512)
     predictions = defaultdict(list)
 
-    iterator = iter(loader)
-    iter_per_epoch = len(loader)
-    for i in progressbar(range(iter_per_epoch)):
-        next_batch = next(iterator)
-        inputs_tensor, ids = next_batch["inputs"], next_batch["id"]
-
-        for fold in range(num_folds):
-            model = ResNet(BasicBlock, 2, [2, 2, 2, 2], num_classes=1, fold_number=fold)
-            model.load("./models/best_fold_%s.mdl" % fold)
-            if torch.cuda.is_available():
-                model.cuda()
+    for fold in range(num_folds):
+        model = ResNet(BasicBlock, 2, [2, 2, 2, 2], num_classes=1, fold_number=fold)
+        model.load("./models/best_fold_%s.mdl" % fold)
+        if torch.cuda.is_available():
+            model.cuda()
+        iterator = iter(loader)
+        iter_per_epoch = len(loader)
+        for _ in progressbar(range(iter_per_epoch)):
+            next_batch = next(iterator)
+            inputs_tensor, ids = next_batch["inputs"], next_batch["id"]
             inputs = model.to_var(inputs_tensor)
             probs, _ = model.predict(inputs, return_classes=False)
             probs = model.to_np(probs).squeeze()

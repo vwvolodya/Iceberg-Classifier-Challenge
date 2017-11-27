@@ -4,12 +4,25 @@ import os
 import matplotlib.pyplot as plt
 from torchvision import transforms
 from skimage import restoration
+from scipy import ndimage
 from base.dataset import BaseDataset, ToTensor
 
 
 # scaler params computed on dataset
 MIN_MAX = {"min1": -45.594448, "min2": -45.655499, "max1": 34.574917, "max2": 20.154249}
 MU_SIGMA = {"mu1": -20.655831, "mu2": -26.320702, "sigma1": 5.200838, "sigma2": 3.395518}
+
+
+class Rotate:
+    def __init__(self, angle, size=75):
+        self.size = size
+        self.angle = angle
+
+    def __call__(self, item):
+        image = item["inputs"]
+        image = ndimage.rotate(image, self.angle, axes=(1, 2))
+        item["inputs"] = image
+        return item
 
 
 class Flip:
@@ -58,6 +71,8 @@ class IcebergDataset(BaseDataset):
         ch_2 = self.ch2[idx]
         ch1_2d = np.reshape(ch_1, (self.width, self.width))
         ch2_2d = np.reshape(ch_2, (self.width, self.width))
+        ch1_2d = self._denoise(ch1_2d)
+        ch2_2d = self._denoise(ch2_2d)
         mu1, sigma1 = self._get_image_stat(ch1_2d)
         mu2, sigma2 = self._get_image_stat(ch2_2d)
         if scale:
@@ -96,8 +111,12 @@ class IcebergDataset(BaseDataset):
         plt.savefig(path)
         plt.clf()
 
-    def vis(self, idx, average=True, scale=False, restore=False):
-        psf = np.ones((5, 5)) / 25
+    def _denoise(self, image):
+        # new_image = ndimage.median_filter(image, 3)
+        new_image = ndimage.gaussian_filter(image, 2)
+        return new_image
+
+    def vis(self, idx, average=True, scale=False, denoise=False, prefix=""):
         base_dir = self.im_dir or "./"
         image, mu1, sigma1, mu2, sigma2 = self._get_image(idx, scale=scale)
         label = self.y[idx]
@@ -105,15 +124,16 @@ class IcebergDataset(BaseDataset):
         if average:
             image = np.mean(image, axis=0)
             mu, sigma = self._get_image_stat(image)
-            path = os.path.join(base_dir, "im_%s_%s_%s.jpg" % (idx, label, "restored" if restore else ""))
-            if restore:
-                image = restoration.unsupervised_wiener(image, psf)[0]
+            path = os.path.join(base_dir, "%sim_%s_%s.jpg" % (prefix, idx, label))
             self._make_heatmap(image, path, label=label, angle=angle, mu=mu, sigma=sigma)
         else:
-            path_1 = os.path.join(base_dir, "im_%s_ch1_%s.jpg" % (idx, label))
-            path_2 = os.path.join(base_dir, "im_%s_ch2_%s.jpg" % (idx, label))
+            path_1 = os.path.join(base_dir, "%sim_%s_ch1_%s.jpg" % (prefix, idx, label))
+            path_2 = os.path.join(base_dir, "%sim_%s_ch2_%s.jpg" % (prefix, idx, label))
             image_1 = image[0, :, :]
             image_2 = image[1, :, :]
+            if denoise:
+                image_1 = self._denoise(image_1)
+                image_2 = self._denoise(image_2)
             self._make_heatmap(image_1, path_1, label=label, angle=angle, mu1=mu1, sigma1=sigma1)
             self._make_heatmap(image_2, path_2, label=label, angle=angle, mu2=mu2, sigma2=sigma2)
 
@@ -127,13 +147,14 @@ if __name__ == "__main__":
         t3 = transforms.Compose([Flip(axis=1), ToTensor()])
         t4 = transforms.Compose([Flip(axis=2), Flip(axis=1), ToTensor()])
         t5 = transforms.Compose([Flip(axis=1), Flip(axis=2), ToTensor()])
+        t6 = transforms.Compose([Rotate(45), ToTensor()])
 
-        ds1 = IcebergDataset("../data/folds/train_1.npy", transform=t4, im_dir="../data/vis")
+        ds1 = IcebergDataset("../data/folds/train_1.npy", transform=t6, im_dir="../data/vis")
         for i in range(len(ds1)):
             sample = ds1[i]
-            # ds1.vis(i, average=False, scale=True, restore=False)
+            ds1.vis(i, average=False, scale=True, denoise=False, prefix="rot_45_")
             print(i, sample['inputs'].size(), sample['targets'].size(), sample["targets"].numpy()[0])
-            if i == 100:
+            if i == 50:
                 break
 
         dataloader = DataLoader(ds1, batch_size=4, shuffle=True, num_workers=1, pin_memory=True)
@@ -155,4 +176,4 @@ if __name__ == "__main__":
             if i == 3:
                 break
 
-    test_set()
+    train_set()

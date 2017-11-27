@@ -214,6 +214,7 @@ class ResNet(BaseModel):
             is_best = stats["val_loss"] < best_loss
             best_loss = min(best_loss, stats["val_loss"])
             self.save("./models/clf_%s_fold_%s.mdl" % (str(e + 1), self.fold_number), optim, is_best)
+        return best_loss
 
 
 if __name__ == "__main__":
@@ -246,7 +247,7 @@ if __name__ == "__main__":
         val_ds = IcebergDataset("../data/folds/test_%s.npy" % fold, transform=ToTensor(), top=top)
 
         net = ResNet(BasicBlock, 2, [2, 2, 2, 2], num_classes=1, fold_number=fold)
-        net.show_env_info()
+        # net.show_env_info()
 
         train_loaders = [DataLoader(ds, batch_size=train_batch_size, num_workers=12, pin_memory=True)
                          for ds in train_sets]
@@ -257,4 +258,5 @@ if __name__ == "__main__":
             loss_func.cuda()
 
         optim = torch.optim.Adam(net.parameters(), lr=0.0001)
-        net.fit(optim, loss_func, train_loaders, val_loader, 25, logger=main_logger)
+        best = net.fit(optim, loss_func, train_loaders, val_loader, 15, logger=main_logger)
+        print("Best was ", best)
