@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 from torchvision import transforms
-from scipy import ndimage
+from scipy import ndimage, signal
 from base.dataset import BaseDataset, ToTensor
 
 
@@ -19,24 +19,20 @@ class Rotate:
 
     def __call__(self, item):
         image = item["inputs"]
-        plane_1 = image[0, :, :]
-        plane_2 = image[1, :, :]
+        channels = image.shape[0]
+        planes = [image[i, :, :] for i in range(channels)]
         if not self.standard_angle:
-            image_1 = ndimage.rotate(plane_1, self.angle, axes=(1, 0), mode="nearest", reshape=False)
-            image_2 = ndimage.rotate(plane_2, self.angle, axes=(1, 0), mode="nearest", reshape=False)
+            images = [ndimage.rotate(im, self.angle, axes=(1, 0), mode="nearest", reshape=False) for im in planes]
         else:
             if self.angle == 90:
-                image_1 = np.rot90(plane_1)
-                image_2 = np.rot90(plane_2)
+                images = [np.rot90(im) for im in planes]
             elif self.angle == 180:
-                image_1 = np.rot90(np.rot90(plane_1))
-                image_2 = np.rot90(np.rot90(plane_2))
+                images = [np.rot90(np.rot90(im)) for im in planes]
             elif self.angle == 270:
-                image_1 = np.rot90(np.rot90(np.rot90(plane_1)))
-                image_2 = np.rot90(np.rot90(np.rot90(plane_2)))
+                images = [np.rot90(np.rot90(np.rot90(im))) for im in planes]
             else:
                 raise Exception("Invalid angle!")
-        image = np.stack((image_1, image_2), axis=0)
+        image = np.stack(images, axis=0)
         item["inputs"] = image
         return item
 
@@ -52,15 +48,16 @@ class Flip:
 
 
 class IcebergDataset(BaseDataset):
-    def __init__(self, path, inference_only=False, transform=None, im_dir=None,
-                 min_max=MIN_MAX, top=None, mu_sigma=MU_SIGMA, denoise=False):
+    def __init__(self, path, inference_only=False, transform=None, im_dir=None, colormap="jet",
+                 top=None, mu_sigma=MU_SIGMA, denoise=False, add_feature_planes=False, width=75):
+        self.add_feature_planes = add_feature_planes
         self.transform = transform
         self.denoise = denoise
-        self.min_max = min_max
+        self.colormap = colormap
         self.mu_sigma = mu_sigma
         self.inference_only = inference_only
         self.im_dir = im_dir
-        self.width = 75  # according to dataset each "picture" is unrolled 75 * 75 "image"
+        self.width = width  # according to dataset each "picture" is unrolled 75 * 75 "image"
         if inference_only:
             data = pd.read_json(path)
             self.data = data[["band_1", "band_2", "inc_angle"]].as_matrix()
@@ -74,6 +71,7 @@ class IcebergDataset(BaseDataset):
         self.ch2 = self.data[:, 1]
         self.angle = self.data[:, 2]
         print("Ds length ", self.data.shape[0])
+        self.num_feature_planes = 2
 
     def __len__(self):
         return self.data.shape[0]
@@ -84,7 +82,7 @@ class IcebergDataset(BaseDataset):
         std_1 = np.std(image)
         return mean_1, std_1
 
-    def _get_image(self, idx, scale=True):
+    def _get_image(self, idx):
         ch_1 = self.ch1[idx]
         ch_2 = self.ch2[idx]
         ch1_2d = np.reshape(ch_1, (self.width, self.width))
@@ -92,22 +90,56 @@ class IcebergDataset(BaseDataset):
         if self.denoise:
             ch1_2d = self._denoise(ch1_2d)
             ch2_2d = self._denoise(ch2_2d)
-        mu1, sigma1 = self._get_image_stat(ch1_2d)
-        mu2, sigma2 = self._get_image_stat(ch2_2d)
-        if scale:
-            # min max scaling
-            # diff_1 = self.min_max["max1"] - self.min_max["min1"]
-            # diff_2 = self.min_max["max2"] - self.min_max["min2"]
-            # ch1_2d = (ch1_2d - self.min_max["min1"]) / diff_1
-            # ch2_2d = (ch2_2d - self.min_max["min2"]) / diff_2
-
+        if self.mu_sigma is not None:
             ch1_2d = (ch1_2d - self.mu_sigma["mu1"]) / self.mu_sigma["sigma1"]
             ch2_2d = (ch2_2d - self.mu_sigma["mu2"]) / self.mu_sigma["sigma2"]
         image = np.stack((ch1_2d, ch2_2d), axis=0)  # PyTorch uses NCHW ordering
-        return image, mu1, sigma1, mu2, sigma2
+        return image
+
+    @classmethod
+    def __correlate(cls, im1, im2):
+        # images here should have 3d shape
+        im1_gray = np.sum(im1, axis=0)
+        im2_gray = np.sum(im2, axis=0)
+
+        im1_gray -= np.mean(im1_gray)
+        im2_gray -= np.mean(im2_gray)
+
+        corr = signal.correlate(im1_gray, im2_gray, mode='same')
+        return corr
+
+    @classmethod
+    def __fft_convolve(cls, im1, im2):
+        # images here should have 3d shape
+        im1_gray = np.sum(im1, axis=0)
+        im2_gray = np.sum(im2, axis=0)
+
+        im1_gray -= np.mean(im1_gray)
+        im2_gray -= np.mean(im2_gray)
+
+        fft = signal.fftconvolve(im1_gray, im2_gray[::-1, ::-1], mode='same')
+        return fft
+
+    def _add_planes(self, image):
+        plane_1 = image[0, :, :]
+        plane_2 = image[1, :, :]
+        averaged = np.mean(image, axis=0)
+        gauss1 = self._denoise(plane_1, algo="gauss")
+        gauss2 = self._denoise(plane_2, algo="gauss")
+        median_1 = self._denoise(plane_1, algo="median")
+        median_2 = self._denoise(plane_2, algo="median")
+
+        correlated = self.__correlate(image, image)
+        correlated = correlated / np.max(correlated)
+        image = np.stack((plane_1, plane_2, averaged, median_1, median_2, gauss1, gauss2, correlated), axis=0)
+
+        self.num_feature_planes = image.shape[0]
+        return image
 
     def __getitem__(self, idx):
-        image, _, _, _, _ = self._get_image(idx, scale=True)
+        image = self._get_image(idx)
+        if self.add_feature_planes:
+            image = self._add_planes(image)
         item = {"inputs": image}
         if self.inference_only:
             y = np.array([0])
@@ -119,26 +151,31 @@ class IcebergDataset(BaseDataset):
             item = self.transform(item)
         return item
 
-    @classmethod
-    def _make_heatmap(cls, image, path, label=None, angle=None, **kwargs):
+    def _make_heatmap(self, image, path, label=None, angle=None, **kwargs):
         string = ""
         for k, v in kwargs.items():
             string += str(k) + " " + "{0:.2f}".format(v) + " "
         if label is not None:
             plt.suptitle("%s, angle: %s %s" % (str(label), str(angle), string))
-        plt.imshow(image, cmap="jet")
+        plt.imshow(image, cmap=self.colormap)
         plt.savefig(path)
         plt.clf()
 
-    def _denoise(self, image):
-        # new_image = ndimage.median_filter(image, 3)
-        new_image = ndimage.gaussian_filter(image, 2)
-        # new_image = ndimage.sobel(image, 2)
+    def _denoise(self, image, algo="gauss"):
+        if algo == "gauss":
+            new_image = ndimage.gaussian_filter(image, 2)
+        elif algo == "median":
+            new_image = ndimage.median_filter(image, 3)
+        else:
+            raise Exception("Unknown algorithm. Use one of (gauss, median)")
         return new_image
 
-    def vis(self, idx, average=True, scale=False, denoise=False, prefix=""):
+    def vis(self, idx, average=False, prefix=""):
         base_dir = self.im_dir or "./"
-        image, mu1, sigma1, mu2, sigma2 = self._get_image(idx, scale=scale)
+        image = self[idx]["inputs"]
+        if not isinstance(image, np.ndarray):
+            image = image.numpy()
+
         label = self.y[idx]
         angle = self.angle[idx]
         if average:
@@ -147,15 +184,13 @@ class IcebergDataset(BaseDataset):
             path = os.path.join(base_dir, "%sim_%s_%s.jpg" % (prefix, idx, label))
             self._make_heatmap(image, path, label=label, angle=angle, mu=mu, sigma=sigma)
         else:
-            path_1 = os.path.join(base_dir, "%sim_%s_ch1_%s.jpg" % (prefix, idx, label))
-            path_2 = os.path.join(base_dir, "%sim_%s_ch2_%s.jpg" % (prefix, idx, label))
-            image_1 = image[0, :, :]
-            image_2 = image[1, :, :]
-            if denoise:
-                image_1 = self._denoise(image_1)
-                image_2 = self._denoise(image_2)
-            self._make_heatmap(image_1, path_1, label=label, angle=angle, mu1=mu1, sigma1=sigma1)
-            self._make_heatmap(image_2, path_2, label=label, angle=angle, mu2=mu2, sigma2=sigma2)
+            channels = image.shape[0]
+            paths = [os.path.join(base_dir, "%sim_%s_ch%s_%s.jpg" % (prefix, idx, i, label)) for i in range(channels)]
+            image_planes = [image[i, :, :] for i in range(channels)]
+            mu_sigmas = [self._get_image_stat(i) for i in image_planes]
+            for c in range(channels):
+                self._make_heatmap(image_planes[c], paths[c], label=label, angle=angle,
+                                   mu1=mu_sigmas[0][0], sigma1=mu_sigmas[0][1])
 
 
 if __name__ == "__main__":
@@ -167,12 +202,13 @@ if __name__ == "__main__":
         t3 = transforms.Compose([Flip(axis=1), ToTensor()])
         t4 = transforms.Compose([Flip(axis=2), Flip(axis=1), ToTensor()])
         t5 = transforms.Compose([Flip(axis=1), Flip(axis=2), ToTensor()])
-        t6 = transforms.Compose([Rotate(30), ToTensor()])
+        t6 = transforms.Compose([Rotate(90), ToTensor()])
 
-        ds1 = IcebergDataset("../data/folds/train_1.npy", transform=t6, im_dir="../data/vis")
+        ds1 = IcebergDataset("../data/folds/train_1.npy", transform=t1, im_dir="../data/vis",
+                             colormap="inferno", add_feature_planes=True)
         for i in range(len(ds1)):
             sample = ds1[i]
-            ds1.vis(i, average=False, scale=True, denoise=False, prefix="rot_90_")
+            ds1.vis(i, average=False, prefix="diff_")
             print(i, sample['inputs'].size(), sample['targets'].size(), sample["targets"].numpy()[0])
             if i == 10:
                 break
