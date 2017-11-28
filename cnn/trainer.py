@@ -26,11 +26,16 @@ class ModelTrainer:
         self._cache = {}        # used to keep track of tried configurations
 
         self._kill = False
+        self._searching = False
         signal.signal(signal.SIGINT, self._exit_gracefully)
 
     def _exit_gracefully(self, signum, frame):
         print("Got signal number %s. Will stop as soon as possible!" % signum)
-        self._kill = True
+        if self._searching:
+            self._kill = True
+        else:
+            print("Exiting now!")
+            exit(2)
 
     def _get_random_config(self, config, verbose=True):
         generated = False
@@ -88,6 +93,7 @@ class ModelTrainer:
 
     def random_search(self, iterations, config, train_epochs, transformations,
                       verbose=True, result_path="../data/results.csv"):
+        self._searching = True
         all_scores = []
         for _ in progressbar(range(iterations)):
             if self._kill:
@@ -101,6 +107,7 @@ class ModelTrainer:
             if verbose:
                 print(all_scores)
         self._save_results(all_scores, result_path)
+        self._searching = False
         return all_scores
 
 
@@ -111,7 +118,7 @@ if __name__ == "__main__":
         "conv": [(16, 32, 64, 128), (24, 48, 96, 192), (32, 64, 128, 256), (64, 128, 256, 512)]
     }
     best_config = {
-        "lr": 0.001, "gain": 0.1, "conv": (64, 128, 256, 512)
+        "lr": 0.0001, "gain": 0.1, "conv": (64, 128, 256, 512)
     }
     n_folds = 5
     top = None
@@ -149,4 +156,5 @@ if __name__ == "__main__":
     trainer = ModelTrainer(num_planes, LeNet, loss_func, n_folds, Logger, train_top=top, test_top=val_top,
                            train_batch_size=train_bsize, test_batch_size=test_b_size)
     # trainer.random_search(5, parameter_grid, train_epochs=25, transformations=all_transformations)
-    trainer.train_one_configuration(best_config, 40, all_transformations)
+    loss_scores = trainer.train_one_configuration(best_config, 15, all_transformations)
+    print(loss_scores)

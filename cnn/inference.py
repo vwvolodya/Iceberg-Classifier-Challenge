@@ -14,17 +14,15 @@ def softmax(x):
 
 
 def infer(path, num_folds, losses):
-    ds = IcebergDataset(path, inference_only=True, transform=ToTensor())
+    ds = IcebergDataset(path, inference_only=True, transform=ToTensor(), add_feature_planes=True)
     loader = DataLoader(ds, 512)
     predictions = defaultdict(list)
     weights = [1-i for i in losses]
     a = softmax(np.array(weights))
 
     for fold in range(num_folds):
-        # model = ResNet(BasicBlock, 2, [2, 2, 2, 2], num_classes=1, fold_number=fold)
-        # model.load("./models/best_fold_%s.mdl" % fold)
-        model = LeNet(num_classes=1, fold_number=fold)
-        model.load("./models/le_best_fold_%s.mdl" % fold)
+        model = LeNet(7, (64, 128, 256, 512), 128, 32, num_classes=1, fold_number=fold)
+        model.load("./models/-1667741683157497799_best_%s.mdl" % fold)
         if torch.cuda.is_available():
             model.cuda()
         iterator = iter(loader)
@@ -46,8 +44,8 @@ def infer(path, num_folds, losses):
 
 if __name__ == "__main__":
     original = "../data/orig/test.json"
-    total_folds = 5
-    scores = [0.2756, 0.2966, 0.2740, 0.3988, 0.27]
+    total_folds = 2
+    scores = [0.19850767403849545, 0.17849749947587648]
     data = infer(original, total_folds, scores)
 
     new_df = pd.DataFrame(list(data.items()), columns=["id", "is_iceberg"])
