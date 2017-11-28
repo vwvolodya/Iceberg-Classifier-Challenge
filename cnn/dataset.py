@@ -120,18 +120,31 @@ class IcebergDataset(BaseDataset):
         fft = signal.fftconvolve(im1_gray, im2_gray[::-1, ::-1], mode='same')
         return fft
 
+    @classmethod
+    def __multiply(cls, im1, im2):
+        image = np.multiply(im1, im2)
+        image = image / np.max(image)
+        return image
+
     def _add_planes(self, image):
         plane_1 = image[0, :, :]
         plane_2 = image[1, :, :]
         averaged = np.mean(image, axis=0)
-        gauss1 = self._denoise(plane_1, algo="gauss")
-        gauss2 = self._denoise(plane_2, algo="gauss")
+        # gauss1 = self._denoise(plane_1, algo="gauss")
+        # gauss2 = self._denoise(plane_2, algo="gauss")
+        gauss3 = self._denoise(averaged, algo="gauss")
         median_1 = self._denoise(plane_1, algo="median")
         median_2 = self._denoise(plane_2, algo="median")
+        median_3 = self._denoise(averaged, algo="median")
+
+        multiplied = self.__multiply(plane_1, plane_2)
+        gauss_multiplied = self._denoise(multiplied, algo="gauss")
+        median_multiplied = self._denoise(multiplied, algo="median")
 
         correlated = self.__correlate(image, image)
         correlated = correlated / np.max(correlated)
-        image = np.stack((plane_1, plane_2, averaged, median_1, median_2, gauss1, gauss2, correlated), axis=0)
+        image = np.stack((median_1, median_2, median_3, gauss3, correlated, median_multiplied,
+                          gauss_multiplied), axis=0)
 
         self.num_feature_planes = image.shape[0]
         return image
