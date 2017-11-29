@@ -7,7 +7,7 @@ def split(path, n_splits=5):
     data = pd.read_json(path)
     np_data = data[["band_1", "band_2", "inc_angle", "is_iceberg"]].as_matrix()
     y = data["is_iceberg"].as_matrix()
-    stk = StratifiedKFold(n_splits=n_splits, random_state=59)
+    stk = StratifiedKFold(n_splits=n_splits, random_state=42)
     result = []
     for train, test in stk.split(np_data, y):
         fold_train = np_data[train, :]
@@ -72,9 +72,9 @@ def get_mu_sigma(path):
 
 if __name__ == "__main__":
     original = "../data/orig/train.json"
-    # res = split(original)
-    # for i, (tr, tt) in enumerate(res):
-    #     np.save("../data/folds/train_%s" % i, tr)
-    #     np.save("../data/folds/test_%s" % i, tt)
-    get_mu_sigma(original)
+    res = split(original, n_splits=4)
+    for i, (tr, tt) in enumerate(res):
+        np.save("../data/folds/train_%s" % i, tr)
+        np.save("../data/folds/test_%s" % i, tt)
+    # get_mu_sigma(original)
     print("Finished!")

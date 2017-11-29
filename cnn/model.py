@@ -120,8 +120,7 @@ class LeNet(BaseBinaryClassifier):
 
         self.feature_extractor = nn.Sequential(*layers)
         self.fc1 = nn.Linear(conv_layers[-1] * 4 * 4, fc1)
-        self.fc2 = nn.Linear(fc1, fc2)
-        self.fc3 = nn.Linear(fc2, num_classes)
+        self.fc2 = nn.Linear(fc1, num_classes)
 
         nn.init.xavier_normal(self.fc1.weight, gain=gain)
         nn.init.xavier_normal(self.fc2.weight, gain=gain)
@@ -131,8 +130,8 @@ class LeNet(BaseBinaryClassifier):
         out = self.feature_extractor(x)
         out = out.view(out.size(0), -1)
         out = self.fc1(out)
+        out = self.activation(out)
         out = self.fc2(out)
-        out = self.fc3(out)
         out = self.sigmoid(out)
         return out
 

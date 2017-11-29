@@ -62,7 +62,7 @@ class ModelTrainer:
             main_logger = self.logger_class("../logs/%s" % f)
 
             model_prefix = str(hash(str(config)))
-            net = self.model_class(self.num_feature_planes, config["conv"], 128, 32, fold_number=f,
+            net = self.model_class(self.num_feature_planes, 32, 32, 32, fold_number=f,
                                    gain=config["gain"], model_prefix=model_prefix)
 
             if torch.cuda.is_available():
@@ -121,9 +121,9 @@ if __name__ == "__main__":
         "conv": [(16, 32, 64, 128), (24, 48, 96, 192), (32, 64, 128, 256), (64, 128, 256, 512)]
     }
     best_config_inception = {
-        "lr": 0.00005, "gain": 0.1, "conv": 32, "lambda": 0.01
+        "lr": 0.0001, "gain": 0.1, "conv": 32, "lambda": 0.01
     }
-    n_folds = 5
+    n_folds = 4
     top = None
     val_top = None
     train_bsize = 256

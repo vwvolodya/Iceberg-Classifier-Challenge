@@ -126,7 +126,6 @@ class IcebergDataset(BaseDataset):
     @classmethod
     def __multiply(cls, im1, im2):
         image = np.multiply(im1, im2)
-        image = image / np.abs(np.max(image))
         return image
 
     def _add_planes(self, image):
