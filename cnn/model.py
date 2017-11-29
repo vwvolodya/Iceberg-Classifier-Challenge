@@ -1,10 +1,6 @@
 import math
-import abc
 from torch import nn
-import numpy as np
-from tqdm import tqdm as progressbar
-from sklearn import metrics
-from base.model import BaseModel
+from base.model import BaseBinaryClassifier
 
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -41,124 +37,6 @@ class BasicBlock(nn.Module):
         out = self.elu(out)
 
         return out
-
-
-class BaseBinaryClassifier(BaseModel):
-    @classmethod
-    def _get_classes(cls, predictions):
-        classes = (predictions.data > 0.5).float()
-        pred_y = classes.cpu().numpy().squeeze()
-        return pred_y
-
-    @abc.abstractmethod
-    def forward(self, *args, **kwargs):
-        pass
-
-    def predict(self, x, return_classes=False):
-        predictions = self.__call__(x)
-        classes = None
-        if return_classes:
-            classes = self._get_classes(predictions)
-        return predictions, classes
-
-    @classmethod
-    def _get_inputs(cls, iterator):
-        next_batch = next(iterator)
-        inputs, labels = next_batch["inputs"], next_batch["targets"]
-        inputs, labels = cls.to_var(inputs), cls.to_var(labels)
-        return inputs, labels
-
-    def _compute_metrics(self, target_y, pred_y, predictions_are_classes=True, training=True):
-        prefix = "val_" if not training else ""
-        if predictions_are_classes:
-            recall = metrics.recall_score(target_y, pred_y, pos_label=1.0)
-            precision = metrics.precision_score(target_y, pred_y, pos_label=1.0)
-            accuracy = metrics.accuracy_score(target_y, pred_y)
-            result = {"precision": precision, "recall": recall, "acc": accuracy}
-        else:
-            fpr, tpr, thresholds = metrics.roc_curve(target_y, pred_y, pos_label=1.0)
-            auc = metrics.auc(fpr, tpr)
-            result = {"auc": auc}
-
-        final = {}
-        for k, v in result.items():
-            final[prefix + k] = v
-        return final
-
-    def evaluate(self, logger, loader, loss_fn=None, switch_to_eval=False):
-        # aggregate results from training epoch.
-        train_losses = self._predictions.pop("train_loss")
-        train_loss = sum(train_losses) / len(train_losses)
-        train_metrics_1 = self._compute_metrics(self._predictions["target"], self._predictions["predicted"])
-        train_metrics_2 = self._compute_metrics(self._predictions["target"], self._predictions["probs"],
-                                                predictions_are_classes=False)
-        train_metrics = {"train_loss": train_loss}
-        train_metrics.update(train_metrics_1)
-        train_metrics.update(train_metrics_2)
-
-        if switch_to_eval:
-            self.eval()
-        iterator = iter(loader)
-        iter_per_epoch = len(loader)
-        all_predictions = np.array([])
-        all_targets = np.array([])
-        all_probs = np.array([])
-        losses = []
-        for i in range(iter_per_epoch):
-            inputs, targets = self._get_inputs(iterator)
-            probs, classes = self.predict(inputs, return_classes=True)
-            target_y = self.to_np(targets).squeeze()
-            if loss_fn:
-                loss = loss_fn(probs, targets)
-                losses.append(loss.data[0])
-            probs = self.to_np(probs).squeeze()
-            all_targets = np.append(all_targets, target_y)
-            all_probs = np.append(all_probs, probs)
-            all_predictions = np.append(all_predictions, classes)
-        computed_metrics = self._compute_metrics(all_targets, all_predictions, training=False)
-        computed_metrics_1 = self._compute_metrics(all_targets, all_probs, training=False,
-                                                   predictions_are_classes=False)
-
-        val_loss = sum(losses) / len(losses)
-        computed_metrics.update({"val_loss": val_loss})
-        computed_metrics.update(computed_metrics_1)
-        if switch_to_eval:
-            # switch back to train
-            self.train()
-
-        self._log_and_reset(logger, data=train_metrics, log_grads=True)
-        self._log_and_reset(logger, data=computed_metrics, log_grads=False)
-
-        self._reset_predictions_cache()
-        return computed_metrics
-
-    def fit(self, optim, loss_fn, data_loaders, validation_data_loader, num_epochs, logger):
-        best_loss = float("inf")
-        for e in progressbar(range(num_epochs)):
-            self._epoch = e
-
-            for data_loader in data_loaders:
-                iter_per_epoch = len(data_loader)
-                data_iter = iter(data_loader)
-                for i in range(iter_per_epoch):
-                    inputs, labels = self._get_inputs(data_iter)
-
-                    predictions, classes = self.predict(inputs, return_classes=True)
-
-                    optim.zero_grad()
-                    loss = loss_fn(predictions, labels)
-                    loss.backward()
-                    optim.step()
-
-                    self._accumulate_results(self.to_np(labels).squeeze(),
-                                             classes,
-                                             loss=loss.data[0],
-                                             probs=self.to_np(predictions).squeeze())
-            stats = self.evaluate(logger, validation_data_loader, loss_fn, switch_to_eval=True)
-            is_best = stats["val_loss"] < best_loss
-            best_loss = min(best_loss, stats["val_loss"])
-            self.save("./models/clf_%s_fold_%s.mdl" % (str(e + 1), self.fold_number), optim, is_best)
-        return best_loss
 
 
 class ResNet(BaseBinaryClassifier):
@@ -235,9 +113,9 @@ class LeNet(BaseBinaryClassifier):
         for i, layer_size in enumerate(conv_layers):
             conv = nn.Conv2d(prev_layer, layer_size, kernel_size, padding=padding, bias=False)
             nn.init.xavier_normal(conv.weight, gain=gain)
-            bn = nn.BatchNorm2d(prev_layer)
+            bn = nn.BatchNorm2d(layer_size)
             max_pool = nn.MaxPool2d(2, stride=2)
-            layers.extend([bn, conv, self.activation, max_pool])
+            layers.extend([conv, bn, self.activation, max_pool])
             prev_layer = layer_size
 
         self.feature_extractor = nn.Sequential(*layers)

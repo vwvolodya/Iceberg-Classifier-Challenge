@@ -1,5 +1,6 @@
 from cnn.dataset import IcebergDataset, ToTensor
 from cnn.model import ResNet, BasicBlock, LeNet
+from cnn.inception import Inception
 from torch.utils.data import DataLoader
 from tqdm import tqdm as progressbar
 from collections import defaultdict
@@ -13,16 +14,16 @@ def softmax(x):
     return e_x / e_x.sum()
 
 
-def infer(path, num_folds, losses):
+def infer(path, num_folds, losses, average=True):
     ds = IcebergDataset(path, inference_only=True, transform=ToTensor(), add_feature_planes=True)
-    loader = DataLoader(ds, 512)
+    loader = DataLoader(ds, 64)
     predictions = defaultdict(list)
     weights = [1-i for i in losses]
     a = softmax(np.array(weights))
 
     for fold in range(num_folds):
-        model = LeNet(7, (64, 128, 256, 512), 128, 32, num_classes=1, fold_number=fold)
-        model.load("./models/-1667741683157497799_best_%s.mdl" % fold)
+        model = Inception(5, 32, None, None, num_classes=1, fold_number=fold)
+        model.load("./models/clf_43_fold_0.mdl")
         if torch.cuda.is_available():
             model.cuda()
         iterator = iter(loader)
@@ -37,15 +38,17 @@ def infer(path, num_folds, losses):
             chunk = dict(zip(ids, probs))
             for k, v in chunk.items():
                 predictions[k].append(v)
-
-    result = {k: sum(np.array(v) * a) for k, v in predictions.items()}
+    if average:
+        result = {k: sum(v) / len(v) for k, v in predictions.items()}
+    else:
+        result = {k: sum(np.array(v) * a) for k, v in predictions.items()}
     return result
 
 
 if __name__ == "__main__":
     original = "../data/orig/test.json"
-    total_folds = 2
-    scores = [0.19850767403849545, 0.17849749947587648]
+    total_folds = 1
+    scores = [0.19850767403849545, 0.17849749947587648, 0.22, 0.32, 0.34]
     data = infer(original, total_folds, scores)
 
     new_df = pd.DataFrame(list(data.items()), columns=["id", "is_iceberg"])

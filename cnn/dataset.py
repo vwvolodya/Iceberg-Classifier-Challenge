@@ -49,8 +49,9 @@ class Flip:
 
 class IcebergDataset(BaseDataset):
     def __init__(self, path, inference_only=False, transform=None, im_dir=None, colormap="jet",
-                 top=None, mu_sigma=MU_SIGMA, denoise=False, add_feature_planes=False, width=75):
+                 top=None, mu_sigma=MU_SIGMA, denoise=False, add_feature_planes=False, width=75, return_angle=False):
         self.add_feature_planes = add_feature_planes
+        self.return_angle = return_angle
         self.transform = transform
         self.denoise = denoise
         self.colormap = colormap
@@ -71,6 +72,8 @@ class IcebergDataset(BaseDataset):
         self.ch2 = self.data[:, 1]
         self.angle = self.data[:, 2]
         print("Ds length ", self.data.shape[0])
+        if not inference_only:
+            print("Positive %s" % sum(self.y))
         self.num_feature_planes = 2
 
     def __len__(self):
@@ -91,8 +94,8 @@ class IcebergDataset(BaseDataset):
             ch1_2d = self._denoise(ch1_2d)
             ch2_2d = self._denoise(ch2_2d)
         if self.mu_sigma is not None:
-            ch1_2d = (ch1_2d - self.mu_sigma["mu1"]) / self.mu_sigma["sigma1"]
-            ch2_2d = (ch2_2d - self.mu_sigma["mu2"]) / self.mu_sigma["sigma2"]
+            ch1_2d = (ch1_2d - self.mu_sigma["mu1"]) / (self.mu_sigma["sigma1"] * 2)
+            ch2_2d = (ch2_2d - self.mu_sigma["mu2"]) / (self.mu_sigma["sigma2"] * 2)
         image = np.stack((ch1_2d, ch2_2d), axis=0)  # PyTorch uses NCHW ordering
         return image
 
@@ -123,7 +126,7 @@ class IcebergDataset(BaseDataset):
     @classmethod
     def __multiply(cls, im1, im2):
         image = np.multiply(im1, im2)
-        image = image / np.max(image)
+        image = image / np.abs(np.max(image))
         return image
 
     def _add_planes(self, image):
@@ -133,8 +136,8 @@ class IcebergDataset(BaseDataset):
         # gauss1 = self._denoise(plane_1, algo="gauss")
         # gauss2 = self._denoise(plane_2, algo="gauss")
         gauss3 = self._denoise(averaged, algo="gauss")
-        median_1 = self._denoise(plane_1, algo="median")
-        median_2 = self._denoise(plane_2, algo="median")
+        # median_1 = self._denoise(plane_1, algo="median")
+        # median_2 = self._denoise(plane_2, algo="median")
         median_3 = self._denoise(averaged, algo="median")
 
         multiplied = self.__multiply(plane_1, plane_2)
@@ -142,9 +145,8 @@ class IcebergDataset(BaseDataset):
         median_multiplied = self._denoise(multiplied, algo="median")
 
         correlated = self.__correlate(image, image)
-        correlated = correlated / np.max(correlated)
-        image = np.stack((median_1, median_2, median_3, gauss3, correlated, median_multiplied,
-                          gauss_multiplied), axis=0)
+        correlated = correlated / np.abs(np.max(correlated))
+        image = np.stack((median_3, gauss3, correlated, median_multiplied, gauss_multiplied), axis=0)
 
         self.num_feature_planes = image.shape[0]
         return image
@@ -154,6 +156,8 @@ class IcebergDataset(BaseDataset):
         if self.add_feature_planes:
             image = self._add_planes(image)
         item = {"inputs": image}
+        if self.return_angle:
+            item["angle"] = np.array([self.angle[idx]])
         if self.inference_only:
             y = np.array([0])
             item["id"] = self.ids[idx]
@@ -188,8 +192,10 @@ class IcebergDataset(BaseDataset):
         image = self[idx]["inputs"]
         if not isinstance(image, np.ndarray):
             image = image.numpy()
-
-        label = self.y[idx]
+        if not self.inference_only:
+            label = self.y[idx]
+        else:
+            label = "Unk"
         angle = self.angle[idx]
         if average:
             image = np.mean(image, axis=0)
@@ -203,11 +209,12 @@ class IcebergDataset(BaseDataset):
             mu_sigmas = [self._get_image_stat(i) for i in image_planes]
             for c in range(channels):
                 self._make_heatmap(image_planes[c], paths[c], label=label, angle=angle,
-                                   mu1=mu_sigmas[0][0], sigma1=mu_sigmas[0][1])
+                                   mu=mu_sigmas[c][0], sigma=mu_sigmas[c][1])
 
 
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
+    from tqdm import tqdm as progressbar
 
     def train_set():
         t1 = ToTensor()
@@ -217,14 +224,14 @@ if __name__ == "__main__":
         t5 = transforms.Compose([Flip(axis=1), Flip(axis=2), ToTensor()])
         t6 = transforms.Compose([Rotate(90), ToTensor()])
 
-        ds1 = IcebergDataset("../data/folds/train_1.npy", transform=t1, im_dir="../data/vis",
+        ds1 = IcebergDataset("../data/folds/test_0.npy", transform=None, im_dir="../data/vis/folds/0",
                              colormap="inferno", add_feature_planes=True)
-        for i in range(len(ds1)):
+        for i in progressbar(range(len(ds1))):
             sample = ds1[i]
-            ds1.vis(i, average=False, prefix="diff_")
-            print(i, sample['inputs'].size(), sample['targets'].size(), sample["targets"].numpy()[0])
-            if i == 10:
-                break
+            ds1.vis(i, average=False, prefix="")
+            # print(i, sample['inputs'].size(), sample['targets'].size(), sample["targets"].numpy()[0])
+            # if i == 10:
+            #     break
 
         dataloader = DataLoader(ds1, batch_size=4, shuffle=True, num_workers=1, pin_memory=True)
         for i_batch, sample_batched in enumerate(dataloader):
@@ -233,9 +240,11 @@ if __name__ == "__main__":
                 break
 
     def test_set():
-        ds = IcebergDataset("../data/orig/test.json", transform=ToTensor(), im_dir="../data/vis", inference_only=True)
-        for i in range(len(ds)):
-            print(i, ds[i]["inputs"].size(), ds[i]["id"])
+        ds = IcebergDataset("../data/orig/test.json", im_dir="../data/vis/test", inference_only=True,
+                            mu_sigma=None, colormap="inferno",)
+        for i in progressbar(range(len(ds))):
+            # print(i, ds[i]["inputs"].size(), ds[i]["id"])
+            ds.vis(i, average=False, prefix="pure_")
             if i == 3:
                 break
 
@@ -246,3 +255,4 @@ if __name__ == "__main__":
                 break
 
     train_set()
+    # test_set()

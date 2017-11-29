@@ -7,9 +7,10 @@ import shutil
 
 
 class Logger(object):
-    def __init__(self, log_dir):
+    def __init__(self, log_dir, erase_folder_content=True):
         """Create a summary writer logging to log_dir."""
-        # self._empty_folder(log_dir)
+        if erase_folder_content:
+            self._empty_folder(log_dir)
         self.writer = tf.summary.FileWriter(log_dir)
 
     @classmethod
