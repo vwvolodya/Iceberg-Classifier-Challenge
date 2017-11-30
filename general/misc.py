@@ -70,11 +70,35 @@ def get_mu_sigma(path):
     return np_data
 
 
+def get_robust_stats(path):
+    data = pd.read_json(path)
+    np_data = data[["band_1", "band_2"]].as_matrix()
+    band_1 = []
+    band_2 = []
+    for i in range(np_data.shape[0]):
+        el_1 = np_data[i, 0]
+        el_2 = np_data[i, 1]
+        band_1.append(el_1)
+        band_2.append(el_2)
+
+    band_1 = np.array(band_1)
+    band_2 = np.array(band_2)
+    median_1 = np.median(band_1)
+    median_2 = np.median(band_2)
+    per25_1 = np.percentile(band_1, 25)
+    per25_2 = np.percentile(band_2, 25)
+    per75_1 = np.percentile(band_1, 75)
+    per75_2 = np.percentile(band_2, 75)
+    res = {"med1": median_1, "med2": median_2, "q1_1": per25_1, "q1_2": per25_2, "q3_1": per75_1, "q3_2": per75_2}
+    print(res)
+
+
 if __name__ == "__main__":
     original = "../data/orig/train.json"
-    res = split(original, n_splits=4)
-    for i, (tr, tt) in enumerate(res):
-        np.save("../data/folds/train_%s" % i, tr)
-        np.save("../data/folds/test_%s" % i, tt)
+    # res = split(original, n_splits=4)
+    # for i, (tr, tt) in enumerate(res):
+    #     np.save("../data/folds/train_%s" % i, tr)
+    #     np.save("../data/folds/test_%s" % i, tt)
     # get_mu_sigma(original)
+    get_robust_stats(original)
     print("Finished!")

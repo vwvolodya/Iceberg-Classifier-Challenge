@@ -15,14 +15,14 @@ def softmax(x):
 
 
 def infer(path, num_folds, losses, average=True):
-    ds = IcebergDataset(path, inference_only=True, transform=ToTensor(), add_feature_planes="simple")
+    ds = IcebergDataset(path, inference_only=True, transform=ToTensor(), add_feature_planes="complex")
     loader = DataLoader(ds, 64)
     predictions = defaultdict(list)
     weights = [1-i for i in losses]
     a = softmax(np.array(weights))
 
     for fold in range(num_folds):
-        model = LeNet.restore("./models/-3621199393588171221_best_%s.mdl" % fold)
+        model = LeNet.restore("./models/-6769971712917608354_best_%s.mdl" % fold)
         if torch.cuda.is_available():
             model.cuda()
         iterator = iter(loader)
@@ -40,16 +40,23 @@ def infer(path, num_folds, losses, average=True):
     if average:
         result = {k: sum(v) / len(v) for k, v in predictions.items()}
     else:
-        result = {k: sum(np.array(v) * a) for k, v in predictions.items()}
+        result = {}
+        for k, v in predictions.items():
+            prob = np.mean(np.array(v))
+            if prob <= 0.1:
+                prob = 0
+            elif prob >= 0.9:
+                prob = 1
+            result[k] = prob
     return result
 
 
 if __name__ == "__main__":
     original = "../data/orig/test.json"
     total_folds = 4
-    scores = [0.2809515263025577, 0.29606284545018124, 0.2588095378417235, 0.324696992452328]
-    data = infer(original, total_folds, scores)
+    scores = [0.25787729311447877, 0.24661139914622673, 0.25538152341659254, 0.31257020510160005]
+    data = infer(original, total_folds, scores, average=False)
 
     new_df = pd.DataFrame(list(data.items()), columns=["id", "is_iceberg"])
-    new_df.to_csv("../data/predicted.csv", float_format='%.4f', index=False)
+    new_df.to_csv("../data/predicted.csv", float_format='%.6f', index=False)
     print(new_df.shape)

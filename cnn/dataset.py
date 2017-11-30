@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
+from tqdm import tqdm as progressbar
 from torchvision import transforms
 from scipy import ndimage, signal
 from base.dataset import BaseDataset, ToTensor
@@ -10,6 +11,7 @@ from base.dataset import BaseDataset, ToTensor
 # scaler params computed on dataset
 MIN_MAX = {"min1": -45.594448, "min2": -45.655499, "max1": 34.574917, "max2": 20.154249}
 MU_SIGMA = {"mu1": -20.655831, "mu2": -26.320702, "sigma1": 5.200838, "sigma2": 3.395518}
+MED_Q = {'med1': -21.0596, 'med2': -26.3451, 'q1_1': -24.1442, 'q1_2': -28.3731, 'q3_1': -17.5402, 'q3_2': -24.3858}
 
 
 class Rotate:
@@ -72,9 +74,10 @@ class IcebergDataset(BaseDataset):
         self.ch1 = self.data[:, 0]
         self.ch2 = self.data[:, 1]
         self.angle = self.data[:, 2]
-        print("Ds length ", self.data.shape[0])
+        print_string = "Ds length %s \t" % self.data.shape[0]
         if not inference_only:
-            print("Positive %s" % sum(self.y))
+            print_string += "Positive %s" % sum(self.y)
+        print(print_string)
         self.num_feature_planes = 2     # by default
 
     def __len__(self):
@@ -95,12 +98,18 @@ class IcebergDataset(BaseDataset):
         ch_2 = self.ch2[idx]
         ch1_2d = np.reshape(ch_1, (self.width, self.width))
         ch2_2d = np.reshape(ch_2, (self.width, self.width))
+        angle = self.angle[idx]
+        if not isinstance(angle, float):
+            angle = 39.26   # mean angle = 39.26
+        multiplier = np.cos(np.deg2rad(angle))
         if self.denoise:
             ch1_2d = self._denoise(ch1_2d)
             ch2_2d = self._denoise(ch2_2d)
         if self.mu_sigma is not None:
-            ch1_2d = (ch1_2d - self.mu_sigma["mu1"]) / (self.mu_sigma["sigma1"] * 2)
-            ch2_2d = (ch2_2d - self.mu_sigma["mu2"]) / (self.mu_sigma["sigma2"] * 2)
+            # ch1_2d = (ch1_2d - self.mu_sigma["mu1"]) / (self.mu_sigma["sigma1"]) * multiplier
+            # ch2_2d = (ch2_2d - self.mu_sigma["mu2"]) / (self.mu_sigma["sigma2"]) * multiplier
+            ch1_2d = (ch1_2d - MED_Q["med1"]) / (MED_Q["q3_1"] - MED_Q["q1_1"]) * multiplier / 3
+            ch2_2d = (ch2_2d - MED_Q["med2"]) / (MED_Q["q3_2"] - MED_Q["q1_2"]) * multiplier / 3
         image = np.stack((ch1_2d, ch2_2d), axis=0)  # PyTorch uses NCHW ordering
         return image
 
@@ -215,7 +224,7 @@ class IcebergDataset(BaseDataset):
             image = np.mean(image, axis=0)
             mu, sigma, median, maximum, minimum, percentile75 = self.get_image_stat(image)
             path = os.path.join(base_dir, "%sim_%s_%s.jpg" % (prefix, idx, label))
-            self._make_heatmap(image, path, label=label, angle=angle, mu=mu, sigma=sigma)
+            self._make_heatmap(image, path, label=label, angle=angle, mu=mu, sigma=sigma, med=median, per75=percentile75)
         else:
             channels = image.shape[0]
             paths = [os.path.join(base_dir, "%sim_%s_ch%s_%s.jpg" % (prefix, idx, i, label)) for i in range(channels)]
@@ -226,9 +235,25 @@ class IcebergDataset(BaseDataset):
                                    mu=mu_sigmas[c][0], sigma=mu_sigmas[c][1], med=mu_sigmas[c][2])
 
 
+def _test_set():
+    ds = IcebergDataset("../data/orig/test.json", im_dir="../data/vis/test", inference_only=True,
+                        mu_sigma=None, colormap="inferno", add_feature_planes="complex")
+    for i in progressbar(range(len(ds))):
+        # print(i, ds[i]["inputs"].size(), ds[i]["id"])
+        ds.vis(i, average=False, prefix="pure_")
+        if i == 3:
+            break
+
+    loader = DataLoader(ds, batch_size=6, shuffle=False, num_workers=1)
+    for i, batch in enumerate(loader):
+        print(i, batch["inputs"].size(), batch["id"])
+        if i == 3:
+            break
+
+
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
-    from tqdm import tqdm as progressbar
+
 
     def train_set():
         t1 = ToTensor()
@@ -238,8 +263,8 @@ if __name__ == "__main__":
         t5 = transforms.Compose([Flip(axis=1), Flip(axis=2), ToTensor()])
         t6 = transforms.Compose([Rotate(90), ToTensor()])
 
-        ds1 = IcebergDataset("../data/folds/test_0.npy", transform=None, im_dir="../data/vis/folds/0",
-                             colormap="inferno", add_feature_planes="simple")
+        ds1 = IcebergDataset("../data/all.npy", transform=None, im_dir="../data/vis/train",
+                             colormap="inferno", add_feature_planes="complex")
         for i in progressbar(range(len(ds1))):
             sample = ds1[i]
             ds1.vis(i, average=False, prefix="")
@@ -251,21 +276,6 @@ if __name__ == "__main__":
         for i_batch, sample_batched in enumerate(dataloader):
             print(i_batch, sample_batched['inputs'].size(), sample_batched['targets'].size())
             if i_batch == 3:
-                break
-
-    def test_set():
-        ds = IcebergDataset("../data/orig/test.json", im_dir="../data/vis/test", inference_only=True,
-                            mu_sigma=None, colormap="inferno",)
-        for i in progressbar(range(len(ds))):
-            # print(i, ds[i]["inputs"].size(), ds[i]["id"])
-            ds.vis(i, average=False, prefix="pure_")
-            if i == 3:
-                break
-
-        loader = DataLoader(ds, batch_size=6, shuffle=False, num_workers=1)
-        for i, batch in enumerate(loader):
-            print(i, batch["inputs"].size(), batch["id"])
-            if i == 3:
                 break
 
     train_set()

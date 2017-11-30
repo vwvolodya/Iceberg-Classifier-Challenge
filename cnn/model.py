@@ -116,19 +116,17 @@ class LeNet(BaseBinaryClassifier):
         for i, layer_size in enumerate(conv_layers):
             conv = nn.Conv2d(prev_layer, layer_size, kernel_size, padding=padding, bias=False)
             nn.init.xavier_normal(conv.weight, gain=gain)
-            bn = nn.BatchNorm2d(layer_size)
+            bn = nn.BatchNorm2d(layer_size, momentum=0.01)
             max_pool = nn.MaxPool2d(2, stride=2)
             layers.extend([conv, bn, self.activation, max_pool])
             prev_layer = layer_size
 
         self.feature_extractor = nn.Sequential(*layers)
         self.fc1 = nn.Linear(conv_layers[-1] * 4 * 4, fc1)
-        self.fc2 = nn.Linear(fc1, fc2)
-        self.fc3 = nn.Linear(fc2, num_classes)
+        self.fc2 = nn.Linear(fc1, num_classes)
 
         nn.init.xavier_normal(self.fc1.weight, gain=gain)
         nn.init.xavier_normal(self.fc2.weight, gain=gain)
-        nn.init.xavier_normal(self.fc3.weight, gain=gain)
 
     def forward(self, x):
         out = self.feature_extractor(x)
@@ -136,8 +134,6 @@ class LeNet(BaseBinaryClassifier):
         out = self.fc1(out)
         out = self.activation(out)
         out = self.fc2(out)
-        out = self.activation(out)
-        out = self.fc3(out)
         out = self.sigmoid(out)
         return out
 

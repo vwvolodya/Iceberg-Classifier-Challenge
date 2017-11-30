@@ -64,17 +64,17 @@ class ModelTrainer:
             main_logger = self.logger_class("../logs/%s" % f)
 
             model_prefix = str(hash(str(config)))
-            net = LeNet(self.num_feature_planes, config["conv"], 256, 64, fold_number=f,
+            net = LeNet(self.num_feature_planes, config["conv"], config["fc1"], None, fold_number=f,
                         gain=config["gain"], model_prefix=model_prefix)
 
             if torch.cuda.is_available():
                 net.cuda()
                 self.loss_func.cuda()
-            train_sets = (
+            train_sets = [
                 IcebergDataset(
                     "../data/folds/train_%s.npy" % f, transform=t, top=self.train_top, add_feature_planes="complex"
                 ) for t in transformations
-            )
+            ]
             val_ds = IcebergDataset("../data/folds/test_%s.npy" % f, transform=ToTensor(),
                                     top=self.test_top, add_feature_planes="complex")
 
@@ -123,16 +123,16 @@ if __name__ == "__main__":
         "conv": [(16, 32, 64, 128), (24, 48, 96, 192), (32, 64, 128, 256), (64, 128, 256, 512)]
     }
     best_config = {
-        "lr": 0.001, "gain": 0.1, "conv": (64, 128, 256, 512), "lambda": 0.01, "fc1": 512, "fc2": 256
+        "lr": 0.001, "gain": 0.01, "conv": (16, 20, 24, 32), "lambda": 5e-3, "fc1": 24, "fc2": 256
     }
     best_config_inception = {
-        "lr": 0.0001, "gain": 0.01, "conv": 48, "lambda": 0, "fc1": None, "fc2": None
+        "lr": 0.0001, "gain": 0.1, "conv": 48, "lambda": 5e-5, "fc1": None, "fc2": None
     }
     n_folds = 4
     top = None
     val_top = None
-    train_bsize = 128
-    test_b_size = 32
+    train_bsize = 384
+    test_b_size = 64
     num_planes = 7
 
     t1 = ToTensor()
