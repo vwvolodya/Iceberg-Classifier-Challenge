@@ -48,8 +48,9 @@ class Flip:
 
 
 class IcebergDataset(BaseDataset):
-    def __init__(self, path, inference_only=False, transform=None, im_dir=None, colormap="jet",
-                 top=None, mu_sigma=MU_SIGMA, denoise=False, add_feature_planes=False, width=75, return_angle=False):
+    def __init__(self, path, inference_only=False, transform=None, im_dir=None, colormap="inferno",
+                 top=None, mu_sigma=None, denoise=False, add_feature_planes="no", width=75, return_angle=False):
+        # add_feature_planes: one of "no", "simple", "complex"
         self.add_feature_planes = add_feature_planes
         self.return_angle = return_angle
         self.transform = transform
@@ -128,32 +129,42 @@ class IcebergDataset(BaseDataset):
         image = np.multiply(im1, im2)
         return image
 
+    def _get_simple_planes(self, image):
+        plane_1 = image[0, :, :]
+        plane_2 = image[1, :, :]
+        plane_3 = plane_1 + plane_2
+        band_1 = (plane_1 - plane_1.mean()) / (plane_1.max() - plane_1.min())
+        band_2 = (plane_2 - plane_2.mean()) / (plane_2.max() - plane_2.min())
+        band_3 = (plane_3 - plane_3.mean()) / (plane_3.max() - plane_3.min())
+
+        image = np.stack((band_1, band_2, band_3), axis=0)
+        self.num_feature_planes = image.shape[0]
+        return image
+
     def _add_planes(self, image):
         plane_1 = image[0, :, :]
         plane_2 = image[1, :, :]
         averaged = np.mean(image, axis=0)
-        # gauss1 = self._denoise(plane_1, algo="gauss")
-        # gauss2 = self._denoise(plane_2, algo="gauss")
         gauss3 = self._denoise(averaged, algo="gauss")
-        # median_1 = self._denoise(plane_1, algo="median")
-        # median_2 = self._denoise(plane_2, algo="median")
         median_3 = self._denoise(averaged, algo="median")
 
         multiplied = self.__multiply(plane_1, plane_2)
-        gauss_multiplied = self._denoise(multiplied, algo="gauss")
+        # gauss_multiplied = self._denoise(multiplied, algo="gauss")
         median_multiplied = self._denoise(multiplied, algo="median")
 
         correlated = self.__correlate(image, image)
         correlated = correlated / np.abs(np.max(correlated))
-        image = np.stack((median_3, gauss3, correlated, median_multiplied, gauss_multiplied), axis=0)
+        image = np.stack((median_3, gauss3, correlated, median_multiplied), axis=0)
 
         self.num_feature_planes = image.shape[0]
         return image
 
     def __getitem__(self, idx):
         image = self._get_image(idx)
-        if self.add_feature_planes:
+        if self.add_feature_planes == "complex":
             image = self._add_planes(image)
+        elif self.add_feature_planes == "simple":
+            image = self._get_simple_planes(image)
         item = {"inputs": image}
         if self.return_angle:
             item["angle"] = np.array([self.angle[idx]])
@@ -224,7 +235,7 @@ if __name__ == "__main__":
         t6 = transforms.Compose([Rotate(90), ToTensor()])
 
         ds1 = IcebergDataset("../data/folds/test_0.npy", transform=None, im_dir="../data/vis/folds/0",
-                             colormap="inferno", add_feature_planes=True)
+                             colormap="inferno", add_feature_planes="simple")
         for i in progressbar(range(len(ds1))):
             sample = ds1[i]
             ds1.vis(i, average=False, prefix="")

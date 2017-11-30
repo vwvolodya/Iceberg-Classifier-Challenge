@@ -1,4 +1,5 @@
 import math
+import torch
 from torch import nn
 from base.model import BaseBinaryClassifier
 
@@ -41,9 +42,11 @@ class BasicBlock(nn.Module):
 
 class ResNet(BaseBinaryClassifier):
     def __init__(self, block, num_feature_planes, layers, num_classes=1, fold_number=0):
+        positional = [None, num_feature_planes, layers]
         self.fold_number = fold_number
         self.inplanes = 32
-        super().__init__(best_model_name="./models/best_fold_%s.mdl" % fold_number)
+        super().__init__(pos_params=positional, named_params={}, model_name="ResNet",
+                         best_model_name="./models/best_fold_%s.mdl" % fold_number)
         self.conv1 = nn.Conv2d(num_feature_planes, 32, kernel_size=3, stride=2, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(32)
         self.elu = nn.ELU(inplace=True)
@@ -52,8 +55,6 @@ class ResNet(BaseBinaryClassifier):
         self.layer1 = self._make_layer(block, 32, layers[0])
         self.layer2 = self._make_layer(block, 48, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 64, layers[2], stride=2)
-        # self.layer4 = self._make_layer(block, 256, layers[3], stride=2)
-        # self.avgpool = nn.AvgPool2d(7, stride=1)
         self.fc1 = nn.Linear(64 * 5 * 5, 16)
         self.fc2 = nn.Linear(16, num_classes)
 
@@ -90,9 +91,7 @@ class ResNet(BaseBinaryClassifier):
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
-        # x = self.layer4(x)
 
-        # x = self.avgpool(x)
         x = x.view(x.size(0), -1)
         x = self.fc1(x)
         x = self.fc2(x)
@@ -104,7 +103,11 @@ class ResNet(BaseBinaryClassifier):
 class LeNet(BaseBinaryClassifier):
     def __init__(self, feature_planes, conv_layers, fc1, fc2, num_classes=1, fold_number=0,
                  kernel_size=3, gain=0.01, padding=1, model_prefix=""):
-        super().__init__(best_model_name="./models/%s_best_%s.mdl" % (model_prefix, fold_number))
+        positional = [feature_planes, conv_layers, fc1, fc2]
+        named = {"num_classes": num_classes, "fold_number": fold_number, "kernel_size": kernel_size,
+                 "gain": gain, "padding": padding, "model_prefix": model_prefix}
+        super().__init__(pos_params=positional, named_params=named, model_name="LeNet",
+                         best_model_name="./models/%s_best_%s.mdl" % (model_prefix, fold_number))
         self.fold_number = fold_number
         self.activation = nn.ELU(inplace=True)
         self.sigmoid = nn.Sigmoid()
@@ -120,7 +123,8 @@ class LeNet(BaseBinaryClassifier):
 
         self.feature_extractor = nn.Sequential(*layers)
         self.fc1 = nn.Linear(conv_layers[-1] * 4 * 4, fc1)
-        self.fc2 = nn.Linear(fc1, num_classes)
+        self.fc2 = nn.Linear(fc1, fc2)
+        self.fc3 = nn.Linear(fc2, num_classes)
 
         nn.init.xavier_normal(self.fc1.weight, gain=gain)
         nn.init.xavier_normal(self.fc2.weight, gain=gain)
@@ -132,10 +136,18 @@ class LeNet(BaseBinaryClassifier):
         out = self.fc1(out)
         out = self.activation(out)
         out = self.fc2(out)
+        out = self.activation(out)
+        out = self.fc3(out)
         out = self.sigmoid(out)
         return out
 
 
 if __name__ == "__main__":
-    net = LeNet(2, (16, 32, 64, 128), 64, 16)
+    net = LeNet(2, (64, 128, 128, 64), 512, 256)
+    opt = torch.optim.Adam(net.parameters())
+    path = "/tmp/dummy.mdl"
+    net.save(path, opt, False, scores={"dummy": 0.23})
+
+    net.load(path)
+    new_model = LeNet.restore(path)
     print()

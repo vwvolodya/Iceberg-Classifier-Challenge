@@ -8,17 +8,20 @@ from sklearn import metrics
 from tqdm import tqdm as progressbar
 from torch.autograd import Variable
 from collections import defaultdict
+from pprint import pformat
 
 
 class BaseModel(nn.Module):
-    def __init__(self, seed=10101, best_model_name="./models/best.mdl"):
+    def __init__(self, pos_params, named_params, seed=10101, model_name=None, best_model_name="./models/best.mdl"):
         self._best_model_name = best_model_name
+        self.model_name = model_name
         self._predictions = defaultdict(list)
         self._epoch = 0
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed(seed)
         super().__init__()
+        self._model_params = {"args": pos_params, "kwargs": named_params}
 
     def _reset_predictions_cache(self):
         self._predictions = defaultdict(list)
@@ -76,9 +79,11 @@ class BaseModel(nn.Module):
         if pred_y is not None:
             self._predictions["predicted"].extend(pred_y)
 
-    def show_env_info(self):
+    @classmethod
+    def show_env_info(cls):
         print('Python VERSION:', sys.version)
         print('CUDA VERSION')
+        # noinspection PyUnresolvedReferences
         print('CUDNN VERSION:', torch.backends.cudnn.version())
         print('Number CUDA Devices:', torch.cuda.device_count())
         print('Devices')
@@ -87,8 +92,11 @@ class BaseModel(nn.Module):
         print("Numpy: ", np.__version__)
         use_cuda = torch.cuda.is_available()
         print("CUDA is available", use_cuda)
+
+    def summary(self):
         print("----------==================------------")
         print(repr(self))
+        print("----------==================------------")
 
     def _log_data(self, logger, data_dict):
         for tag, value in data_dict.items():
@@ -106,11 +114,14 @@ class BaseModel(nn.Module):
         if log_grads:
             self._log_grads(logger)
 
-    def save(self, path, optimizer, is_best):
+    def save(self, path, optimizer, is_best, scores=None):
+        # positional and named params will be used to restore model later
         data = {
             'epoch': self._epoch + 1,
             'state_dict': self.state_dict(),
             'optimizer': optimizer.state_dict(),
+            'model_params': self._model_params,
+            'scores': scores
         }
         torch.save(data, path)
         if is_best:
@@ -118,16 +129,41 @@ class BaseModel(nn.Module):
 
     def load(self, path):
         """
-        Load model
+        Load model state from file. Model must be initialised by this moment
         :param path: string path to file containing model
         :return: instance of this class
         :rtype: BaseModel
         """
         checkpoint = torch.load(path)
         self.load_state_dict(checkpoint['state_dict'])
-        print("Loading model from epoch %s" % checkpoint["epoch"])
+        scores = pformat(checkpoint["scores"])
+        print("Loading model from epoch %s with scores \n%s" % (checkpoint["epoch"], scores))
         self.eval()
         return self
+
+    @classmethod
+    def restore(cls, path):
+        """
+        Create instance of class and load parameters
+        :param path: string path to model file
+        :return: instance of this class
+        :rtype: BaseModel
+        """
+        checkpoint = torch.load(path)
+        epoch = checkpoint["epoch"]
+        scores = pformat(checkpoint["scores"])
+        model_params = checkpoint["model_params"]
+        if model_params is not None:
+            positional = model_params["args"]
+            named = model_params["kwargs"]
+        else:
+            raise Exception("No model params found. Cannot create instance of class!")
+        print("Going to restore model from params:\n%s %s from epoch %s with scores \n"
+              "%s" %(positional, named, epoch, scores))
+        instance = cls(*positional, **named)
+        instance.load_state_dict(checkpoint['state_dict'])
+        instance.eval()
+        return instance
 
 
 class BaseBinaryClassifier(BaseModel):
@@ -172,19 +208,7 @@ class BaseBinaryClassifier(BaseModel):
             final[prefix + k] = v
         return final
 
-    def evaluate(self, logger, loader, loss_fn=None, switch_to_eval=False):
-        # aggregate results from training epoch.
-        train_losses = self._predictions.pop("train_loss")
-        train_loss = sum(train_losses) / len(train_losses)
-        train_metrics_1 = self._compute_metrics(self._predictions["target"], self._predictions["predicted"])
-        train_metrics_2 = self._compute_metrics(self._predictions["target"], self._predictions["probs"],
-                                                predictions_are_classes=False)
-        train_metrics = {"train_loss": train_loss}
-        train_metrics.update(train_metrics_1)
-        train_metrics.update(train_metrics_2)
-
-        if switch_to_eval:
-            self.eval()
+    def _eval_on_validation(self, loader, loss_fn):
         iterator = iter(loader)
         iter_per_epoch = len(loader)
         all_predictions = np.array([])
@@ -209,6 +233,22 @@ class BaseBinaryClassifier(BaseModel):
         val_loss = sum(losses) / len(losses)
         computed_metrics.update({"val_loss": val_loss})
         computed_metrics.update(computed_metrics_1)
+        return computed_metrics
+
+    def evaluate(self, logger, loader, loss_fn=None, switch_to_eval=True):
+        # aggregate results from training epoch.
+        train_losses = self._predictions.pop("train_loss")
+        train_loss = sum(train_losses) / len(train_losses)
+        train_metrics_1 = self._compute_metrics(self._predictions["target"], self._predictions["predicted"])
+        train_metrics_2 = self._compute_metrics(self._predictions["target"], self._predictions["probs"],
+                                                predictions_are_classes=False)
+        train_metrics = {"train_loss": train_loss}
+        train_metrics.update(train_metrics_1)
+        train_metrics.update(train_metrics_2)
+
+        if switch_to_eval:
+            self.eval()
+        computed_metrics = self._eval_on_validation(loader, loss_fn)
         if switch_to_eval:
             # switch back to train
             self.train()
@@ -244,5 +284,6 @@ class BaseBinaryClassifier(BaseModel):
             stats = self.evaluate(logger, validation_data_loader, loss_fn, switch_to_eval=True)
             is_best = stats["val_loss"] < best_loss
             best_loss = min(best_loss, stats["val_loss"])
-            self.save("./models/clf_%s_fold_%s.mdl" % (str(e + 1), self.fold_number), optim, is_best)
+            self.save("./models/%s_%s_fold_%s.mdl" % (self.model_name, str(e + 1), self.fold_number),
+                      optim, is_best, scores=stats)
         return best_loss

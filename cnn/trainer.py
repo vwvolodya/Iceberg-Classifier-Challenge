@@ -55,6 +55,8 @@ class ModelTrainer:
         assert "gain" in config
         assert "conv" in config
         assert "lr" in config
+        assert "fc2" in config
+        assert "fc1" in config
         assert "lambda" in config
         scores = []
 
@@ -62,26 +64,26 @@ class ModelTrainer:
             main_logger = self.logger_class("../logs/%s" % f)
 
             model_prefix = str(hash(str(config)))
-            net = self.model_class(self.num_feature_planes, 32, 32, 32, fold_number=f,
-                                   gain=config["gain"], model_prefix=model_prefix)
+            net = Inception(self.num_feature_planes, config["conv"], 32, 64, fold_number=f,
+                            gain=config["gain"], model_prefix=model_prefix)
 
             if torch.cuda.is_available():
                 net.cuda()
                 self.loss_func.cuda()
             train_sets = (
                 IcebergDataset(
-                    "../data/folds/train_%s.npy" % f, transform=t, top=self.train_top, add_feature_planes=True
+                    "../data/folds/train_%s.npy" % f, transform=t, top=self.train_top, add_feature_planes="complex"
                 ) for t in transformations
             )
             val_ds = IcebergDataset("../data/folds/test_%s.npy" % f, transform=ToTensor(),
-                                    top=self.test_top, add_feature_planes=True)
+                                    top=self.test_top, add_feature_planes="complex")
 
             train_loaders = [DataLoader(ds, batch_size=self.train_batch_size, num_workers=12,
                                         pin_memory=True, shuffle=True)
                              for ds in train_sets]
             val_loader = DataLoader(val_ds, batch_size=self.test_batch_size, num_workers=6, pin_memory=True)
 
-            optim = torch.optim.Adam(net.parameters(), lr=config["lr"], weight_decay=0)
+            optim = torch.optim.Adam(net.parameters(), lr=config["lr"], weight_decay=config["lambda"])
             best = net.fit(optim, self.loss_func, train_loaders, val_loader, epochs, logger=main_logger)
             print()
             print("Best was ", best)
@@ -120,15 +122,18 @@ if __name__ == "__main__":
         "gain": [1, 0.1, 0.01],
         "conv": [(16, 32, 64, 128), (24, 48, 96, 192), (32, 64, 128, 256), (64, 128, 256, 512)]
     }
+    best_config = {
+        "lr": 0.001, "gain": 0.1, "conv": (64, 128, 128, 64), "lambda": 0.01, "fc1": 512, "fc2": 256
+    }
     best_config_inception = {
-        "lr": 0.0001, "gain": 0.1, "conv": 32, "lambda": 0.01
+        "lr": 0.0001, "gain": 0.01, "conv": 48, "lambda": 0, "fc1": None, "fc2": None
     }
     n_folds = 4
     top = None
     val_top = None
-    train_bsize = 256
-    test_b_size = 64
-    num_planes = 5
+    train_bsize = 64
+    test_b_size = 32
+    num_planes = 4
 
     t1 = ToTensor()
 
@@ -140,24 +145,24 @@ if __name__ == "__main__":
     t6 = transforms.Compose([Rotate(180), ToTensor()])
     t7 = transforms.Compose([Rotate(270), ToTensor()])
 
-    t8 = transforms.Compose([Rotate(90), Flip(axis=1), ToTensor()])
-    t9 = transforms.Compose([Rotate(90), Flip(axis=2), ToTensor()])
-    t10 = transforms.Compose([Rotate(90), Flip(axis=1), Flip(axis=1), ToTensor()])
+    # t8 = transforms.Compose([Rotate(90), Flip(axis=1), ToTensor()])
+    # t9 = transforms.Compose([Rotate(90), Flip(axis=2), ToTensor()])
+    # t10 = transforms.Compose([Rotate(90), Flip(axis=1), Flip(axis=1), ToTensor()])
+    #
+    # t11 = transforms.Compose([Rotate(180), Flip(axis=1), ToTensor()])
+    # t12 = transforms.Compose([Rotate(180), Flip(axis=2), ToTensor()])
+    # t13 = transforms.Compose([Rotate(180), Flip(axis=1), Flip(axis=1), ToTensor()])
+    #
+    # t14 = transforms.Compose([Rotate(270), Flip(axis=1), ToTensor()])
+    # t15 = transforms.Compose([Rotate(270), Flip(axis=2), ToTensor()])
+    # t16 = transforms.Compose([Rotate(270), Flip(axis=1), Flip(axis=1), ToTensor()])
 
-    t11 = transforms.Compose([Rotate(180), Flip(axis=1), ToTensor()])
-    t12 = transforms.Compose([Rotate(180), Flip(axis=2), ToTensor()])
-    t13 = transforms.Compose([Rotate(180), Flip(axis=1), Flip(axis=1), ToTensor()])
-
-    t14 = transforms.Compose([Rotate(270), Flip(axis=1), ToTensor()])
-    t15 = transforms.Compose([Rotate(270), Flip(axis=2), ToTensor()])
-    t16 = transforms.Compose([Rotate(270), Flip(axis=1), Flip(axis=1), ToTensor()])
-
-    all_transformations = [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, t15, t16]
+    all_transformations = [t1, t2, t3, t4, t5, t6, t7]  # t8, t9, t10, t11, t12, t13, t14, t15, t16]
 
     loss_func = nn.BCELoss()
 
     trainer = ModelTrainer(num_planes, Inception, loss_func, n_folds, Logger, train_top=top, test_top=val_top,
                            train_batch_size=train_bsize, test_batch_size=test_b_size)
     # trainer.random_search(5, parameter_grid, train_epochs=25, transformations=all_transformations)
-    loss_scores = trainer.train_one_configuration(best_config_inception, 100, all_transformations)
+    loss_scores = trainer.train_one_configuration(best_config_inception, 30, all_transformations)
     print(loss_scores)
