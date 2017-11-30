@@ -47,7 +47,7 @@ def infer(path, num_folds, losses, average=True):
 if __name__ == "__main__":
     original = "../data/orig/test.json"
     total_folds = 4
-    scores = [0.2488340778010232, 0.2653765359095165, 0.2423355174916131, 0.2896027650151934]
+    scores = [0.2809515263025577, 0.29606284545018124, 0.2588095378417235, 0.324696992452328]
     data = infer(original, total_folds, scores)
 
     new_df = pd.DataFrame(list(data.items()), columns=["id", "is_iceberg"])

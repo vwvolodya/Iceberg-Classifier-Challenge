@@ -49,7 +49,7 @@ class Flip:
 
 class IcebergDataset(BaseDataset):
     def __init__(self, path, inference_only=False, transform=None, im_dir=None, colormap="inferno",
-                 top=None, mu_sigma=None, denoise=False, add_feature_planes="no", width=75, return_angle=False):
+                 top=None, mu_sigma=MU_SIGMA, denoise=False, add_feature_planes="no", width=75, return_angle=False):
         # add_feature_planes: one of "no", "simple", "complex"
         self.add_feature_planes = add_feature_planes
         self.return_angle = return_angle
@@ -75,16 +75,20 @@ class IcebergDataset(BaseDataset):
         print("Ds length ", self.data.shape[0])
         if not inference_only:
             print("Positive %s" % sum(self.y))
-        self.num_feature_planes = 2
+        self.num_feature_planes = 2     # by default
 
     def __len__(self):
         return self.data.shape[0]
 
     @classmethod
-    def _get_image_stat(cls, image):
+    def get_image_stat(cls, image):
         mean_1 = np.mean(image)
         std_1 = np.std(image)
-        return mean_1, std_1
+        median_1 = np.median(image)
+        maximum = np.max(image)
+        minimum = np.min(image)
+        percentile_75 = np.percentile(image, 75)
+        return mean_1, std_1, median_1, maximum, minimum, percentile_75
 
     def _get_image(self, idx):
         ch_1 = self.ch1[idx]
@@ -149,12 +153,12 @@ class IcebergDataset(BaseDataset):
         median_3 = self._denoise(averaged, algo="median")
 
         multiplied = self.__multiply(plane_1, plane_2)
-        # gauss_multiplied = self._denoise(multiplied, algo="gauss")
+        gauss_multiplied = self._denoise(multiplied, algo="gauss")
         median_multiplied = self._denoise(multiplied, algo="median")
 
         correlated = self.__correlate(image, image)
         correlated = correlated / np.abs(np.max(correlated))
-        image = np.stack((median_3, gauss3, correlated, median_multiplied), axis=0)
+        image = np.stack((plane_1, plane_2, median_3, gauss3, correlated, median_multiplied, gauss_multiplied), axis=0)
 
         self.num_feature_planes = image.shape[0]
         return image
@@ -209,17 +213,17 @@ class IcebergDataset(BaseDataset):
         angle = self.angle[idx]
         if average:
             image = np.mean(image, axis=0)
-            mu, sigma = self._get_image_stat(image)
+            mu, sigma, median, maximum, minimum, percentile75 = self.get_image_stat(image)
             path = os.path.join(base_dir, "%sim_%s_%s.jpg" % (prefix, idx, label))
             self._make_heatmap(image, path, label=label, angle=angle, mu=mu, sigma=sigma)
         else:
             channels = image.shape[0]
             paths = [os.path.join(base_dir, "%sim_%s_ch%s_%s.jpg" % (prefix, idx, i, label)) for i in range(channels)]
             image_planes = [image[i, :, :] for i in range(channels)]
-            mu_sigmas = [self._get_image_stat(i) for i in image_planes]
+            mu_sigmas = [self.get_image_stat(i) for i in image_planes]
             for c in range(channels):
                 self._make_heatmap(image_planes[c], paths[c], label=label, angle=angle,
-                                   mu=mu_sigmas[c][0], sigma=mu_sigmas[c][1])
+                                   mu=mu_sigmas[c][0], sigma=mu_sigmas[c][1], med=mu_sigmas[c][2])
 
 
 if __name__ == "__main__":
