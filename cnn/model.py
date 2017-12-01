@@ -101,9 +101,9 @@ class ResNet(BaseBinaryClassifier):
 
 
 class LeNet(BaseBinaryClassifier):
-    def __init__(self, feature_planes, conv_layers, fc1, fc2, num_classes=1, fold_number=0,
+    def __init__(self, feature_planes, conv_layers, fc1, momentum=0.5, num_classes=1, fold_number=0,
                  kernel_size=3, gain=0.01, padding=1, model_prefix=""):
-        positional = [feature_planes, conv_layers, fc1, fc2]
+        positional = [feature_planes, conv_layers, fc1]
         named = {"num_classes": num_classes, "fold_number": fold_number, "kernel_size": kernel_size,
                  "gain": gain, "padding": padding, "model_prefix": model_prefix}
         super().__init__(pos_params=positional, named_params=named, model_name="LeNet",
@@ -116,7 +116,7 @@ class LeNet(BaseBinaryClassifier):
         for i, layer_size in enumerate(conv_layers):
             conv = nn.Conv2d(prev_layer, layer_size, kernel_size, padding=padding, bias=False)
             nn.init.xavier_normal(conv.weight, gain=gain)
-            bn = nn.BatchNorm2d(layer_size, momentum=0.01)
+            bn = nn.BatchNorm2d(layer_size, momentum=momentum)
             max_pool = nn.MaxPool2d(2, stride=2)
             layers.extend([conv, bn, self.activation, max_pool])
             prev_layer = layer_size

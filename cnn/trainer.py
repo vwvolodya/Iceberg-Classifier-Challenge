@@ -14,7 +14,7 @@ from tqdm import tqdm as progressbar
 
 class ModelTrainer:
     def __init__(self, num_feature_planes, model_class, loss_fn, num_folds, logger_class,
-                 train_top=None, test_top=None, train_batch_size=256, test_batch_size=64):
+                 train_top=None, test_top=None):
         self.model_class = model_class
         self.loss_func = loss_fn
         self.num_folds = num_folds
@@ -22,8 +22,6 @@ class ModelTrainer:
         self.logger_class = logger_class
         self.train_top = train_top
         self.test_top = test_top
-        self.train_batch_size = train_batch_size
-        self.test_batch_size = test_batch_size
         self._cache = {}        # used to keep track of tried configurations
 
         self._kill = False
@@ -51,21 +49,50 @@ class ModelTrainer:
             print("Next config, ", res)
         return res
 
+    def train_all(self, config, epochs, transformations):
+        main_logger = self.logger_class("../logs")
+        net = LeNet(self.num_feature_planes, config["conv"], config["fc1"], None, fold_number=None,
+                    gain=config["gain"], model_prefix="final")
+
+        if torch.cuda.is_available():
+            net.cuda()
+            self.loss_func.cuda()
+        train_sets = [
+            IcebergDataset(
+                "../data/all.npy", transform=t, top=self.train_top, add_feature_planes="complex"
+            ) for t in transformations
+        ]
+        val_ds = IcebergDataset("../data/folds/test_3.npy", transform=ToTensor(),
+                                top=self.test_top, add_feature_planes="complex")
+
+        train_loaders = [DataLoader(ds, batch_size=config["train_batch_size"], num_workers=12,
+                                    pin_memory=True, shuffle=True)
+                         for ds in train_sets]
+        val_loader = DataLoader(val_ds, batch_size=config["test_batch_size"], num_workers=6, pin_memory=True)
+
+        optim = torch.optim.Adam(net.parameters(), lr=config["lr"], weight_decay=config["lambda"])
+        best = net.fit(optim, self.loss_func, train_loaders, val_loader, epochs, logger=main_logger)
+        print()
+        print("Best was ", best)
+
     def train_one_configuration(self, config, epochs, transformations):
         assert "gain" in config
         assert "conv" in config
         assert "lr" in config
-        assert "fc2" in config
         assert "fc1" in config
         assert "lambda" in config
+        assert "momentum" in config
+        assert "train_batch_size" in config
+        assert "test_batch_size" in config
+
         scores = []
 
         for f in range(self.num_folds):
             main_logger = self.logger_class("../logs/%s" % f)
 
             model_prefix = str(hash(str(config)))
-            net = LeNet(self.num_feature_planes, config["conv"], config["fc1"], None, fold_number=f,
-                        gain=config["gain"], model_prefix=model_prefix)
+            net = LeNet(self.num_feature_planes, config["conv"], config["fc1"], momentum=config["momentum"],
+                        fold_number=f, gain=config["gain"], model_prefix=model_prefix)
 
             if torch.cuda.is_available():
                 net.cuda()
@@ -78,10 +105,10 @@ class ModelTrainer:
             val_ds = IcebergDataset("../data/folds/test_%s.npy" % f, transform=ToTensor(),
                                     top=self.test_top, add_feature_planes="complex")
 
-            train_loaders = [DataLoader(ds, batch_size=self.train_batch_size, num_workers=12,
+            train_loaders = [DataLoader(ds, batch_size=config["train_batch_size"], num_workers=12,
                                         pin_memory=True, shuffle=True)
                              for ds in train_sets]
-            val_loader = DataLoader(val_ds, batch_size=self.test_batch_size, num_workers=6, pin_memory=True)
+            val_loader = DataLoader(val_ds, batch_size=config["test_batch_size"], num_workers=6, pin_memory=True)
 
             optim = torch.optim.Adam(net.parameters(), lr=config["lr"], weight_decay=config["lambda"])
             best = net.fit(optim, self.loss_func, train_loaders, val_loader, epochs, logger=main_logger)
@@ -105,7 +132,7 @@ class ModelTrainer:
                 print("Will exit now because of signal!")
                 break
             current_config = self._get_random_config(config)
-            current_score = self.train_one_configuration(config, train_epochs, transformations)
+            current_score = self.train_one_configuration(current_config, train_epochs, transformations)
 
             current_score.extend([str(current_config), str(hash(str(current_config)))])
             all_scores.append(current_score)
@@ -118,12 +145,18 @@ class ModelTrainer:
 
 if __name__ == "__main__":
     parameter_grid = {
-        "lr": [0.0001, 0.0003, 0.001, 0.003, 0.01, 0.00005],
-        "gain": [1, 0.1, 0.01],
-        "conv": [(16, 32, 64, 128), (24, 48, 96, 192), (32, 64, 128, 256), (64, 128, 256, 512)]
+        "lr": [0.0001],
+        "gain": [0.01],
+        "conv": [(16, 24, 24, 16)],
+        "lambda": [0, 0.003, 0.001],
+        "momentum": [0.5, 0.25, 0.1, 0.05],
+        "test_batch_size": [64],
+        "train_batch_size": [64, 128, 192, 256, 384],
+        "fc1": [16],
     }
     best_config = {
-        "lr": 0.001, "gain": 0.01, "conv": (16, 20, 24, 32), "lambda": 5e-3, "fc1": 24, "fc2": 256
+        "lr": 0.0001, "gain": 0.01, "conv": (16, 24, 24, 16), "lambda": 0, "fc1": 16,
+        "fc2": 256, "train_batch_size": 512, "test_batch_size": 64, "momentum": 0.5
     }
     best_config_inception = {
         "lr": 0.0001, "gain": 0.1, "conv": 48, "lambda": 5e-5, "fc1": None, "fc2": None
@@ -161,8 +194,8 @@ if __name__ == "__main__":
 
     loss_func = nn.BCELoss()
 
-    trainer = ModelTrainer(num_planes, LeNet, loss_func, n_folds, Logger, train_top=top, test_top=val_top,
-                           train_batch_size=train_bsize, test_batch_size=test_b_size)
-    # trainer.random_search(5, parameter_grid, train_epochs=25, transformations=all_transformations)
-    loss_scores = trainer.train_one_configuration(best_config, 20, all_transformations)
+    trainer = ModelTrainer(num_planes, LeNet, loss_func, n_folds, Logger, train_top=top, test_top=val_top)
+    loss_scores = trainer.random_search(25, parameter_grid, train_epochs=20, transformations=all_transformations)
+    # loss_scores = trainer.train_one_configuration(best_config, 20, all_transformations)
+    # trainer.train_all(best_config, 30, all_transformations)
     print(loss_scores)

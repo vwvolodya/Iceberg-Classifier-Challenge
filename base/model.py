@@ -58,10 +58,10 @@ class BaseModel(nn.Module):
             return x.numpy()
 
     @classmethod
-    def to_var(cls, x, use_gpu=True):
+    def to_var(cls, x, use_gpu=True, inference_only=False):
         if torch.cuda.is_available() and use_gpu:
             x = x.cuda(async=True)
-        return Variable(x)
+        return Variable(x, volatile=inference_only)
 
     @classmethod
     def to_tensor(cls, x):
