@@ -6,7 +6,9 @@ from base.logger import Logger
 from cnn.dataset import IcebergDataset, ToTensor, Flip, Rotate
 from cnn.model import LeNet
 from cnn.inception import Inception
-from torch.utils.data import DataLoader
+from cnn.auto_encoder import IcebergEncoder
+from cnn.aenc_dataset import AutoEncoderDataset
+from torch.utils.data import DataLoader, ConcatDataset
 from torchvision import transforms
 from random import choice
 from tqdm import tqdm as progressbar
@@ -62,16 +64,16 @@ class ModelTrainer:
                 "../data/all.npy", transform=t, top=self.train_top, add_feature_planes="complex"
             ) for t in transformations
         ]
+        big_train_set = ConcatDataset(train_sets)
         val_ds = IcebergDataset("../data/folds/test_3.npy", transform=ToTensor(),
                                 top=self.test_top, add_feature_planes="complex")
 
-        train_loaders = [DataLoader(ds, batch_size=config["train_batch_size"], num_workers=12,
-                                    pin_memory=True, shuffle=True)
-                         for ds in train_sets]
+        train_loader = DataLoader(big_train_set, batch_size=config["train_batch_size"], num_workers=12,
+                                  pin_memory=True, shuffle=True)
         val_loader = DataLoader(val_ds, batch_size=config["test_batch_size"], num_workers=6, pin_memory=True)
 
         optim = torch.optim.Adam(net.parameters(), lr=config["lr"], weight_decay=config["lambda"])
-        best = net.fit(optim, self.loss_func, train_loaders, val_loader, epochs, logger=main_logger)
+        best = net.fit(optim, self.loss_func, train_loader, val_loader, epochs, logger=main_logger)
         print()
         print("Best was ", best)
 
@@ -103,16 +105,16 @@ class ModelTrainer:
                     "../data/folds/train_%s.npy" % f, transform=t, top=self.train_top, add_feature_planes="complex"
                 ) for t in transformations
             ]
+            big_train_set = ConcatDataset(train_sets)
             val_ds = IcebergDataset("../data/folds/test_%s.npy" % f, transform=ToTensor(),
                                     top=self.test_top, add_feature_planes="complex")
 
-            train_loaders = [DataLoader(ds, batch_size=config["train_batch_size"], num_workers=12,
-                                        pin_memory=True, shuffle=True)
-                             for ds in train_sets]
+            train_loader = DataLoader(big_train_set, batch_size=config["train_batch_size"], num_workers=12,
+                                      pin_memory=True, shuffle=True)
             val_loader = DataLoader(val_ds, batch_size=config["test_batch_size"], num_workers=6, pin_memory=True)
 
             optim = torch.optim.Adam(net.parameters(), lr=config["lr"], weight_decay=config["lambda"])
-            best = net.fit(optim, self.loss_func, train_loaders, val_loader, epochs, logger=main_logger)
+            best = net.fit(optim, self.loss_func, train_loader, val_loader, epochs, logger=main_logger)
             print()
             print("Best was ", best)
             scores.append(best)
@@ -144,7 +146,7 @@ class ModelTrainer:
         return all_scores
 
 
-if __name__ == "__main__":
+def _train_classifiers():
     parameter_grid = {
         "lr": [0.0001],
         "gain": [0.01],
@@ -201,3 +203,39 @@ if __name__ == "__main__":
     loss_scores = trainer.train_one_configuration(best_config_inception, 40, all_transformations)
     # trainer.train_all(best_config, 30, all_transformations)
     print(loss_scores)
+
+
+def _train_auto_encoders():
+    n_folds = 4
+    top = None
+    val_top = None
+    train_bsize = 256
+    test_b_size = 64
+    num_planes = 2
+    scores = []
+    t = transforms.Compose([Flip(axis=1, rnd=True), Rotate(90, rnd=True),
+                            Flip(axis=2, rnd=True), Rotate(180, rnd=True), ToTensor()])
+    loss_func = nn.MSELoss()
+    for f in range(n_folds):
+        main_logger = Logger("../logs/enc/%s" % f, erase_folder_content=True)
+        train_set = AutoEncoderDataset("../data/folds/train_%s.npy" % f, transform=t, top=top)
+        train_loader = DataLoader(train_set, batch_size=train_bsize, num_workers=12, pin_memory=True)
+        val_set = AutoEncoderDataset("../data/folds/test_%s.npy" % f, transform=ToTensor(), top=val_top)
+        val_loader = DataLoader(val_set, batch_size=test_b_size, num_workers=6, pin_memory=True)
+
+        encoder = IcebergEncoder(num_planes, fold_number=f)
+        if torch.cuda.is_available():
+            encoder.cuda()
+            loss_func.cuda()
+        optim = torch.optim.Adam(encoder.parameters(), lr=0.0001, weight_decay=0.005)
+        best = encoder.fit(optim, loss_func, train_loader, val_loader, 100, logger=main_logger)
+        scores.append(best)
+        print()
+        print("Best was ", best)
+    print(scores)
+    return scores
+
+
+if __name__ == "__main__":
+    _train_auto_encoders()
+    print("Done!")

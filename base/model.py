@@ -1,7 +1,9 @@
 import abc
+import cv2
 import sys
 import numpy as np
 import torch
+import random
 import torch.nn as nn
 import shutil
 from sklearn import metrics
@@ -260,28 +262,27 @@ class BaseBinaryClassifier(BaseModel):
         self._reset_predictions_cache()
         return computed_metrics
 
-    def fit(self, optim, loss_fn, data_loaders, validation_data_loader, num_epochs, logger):
+    def fit(self, optim, loss_fn, data_loader, validation_data_loader, num_epochs, logger):
         best_loss = float("inf")
         for e in progressbar(range(num_epochs)):
-            self._epoch = e
+            self._epoch = e + 1
 
-            for data_loader in data_loaders:
-                iter_per_epoch = len(data_loader)
-                data_iter = iter(data_loader)
-                for i in range(iter_per_epoch):
-                    inputs, labels = self._get_inputs(data_iter)
+            iter_per_epoch = len(data_loader)
+            data_iter = iter(data_loader)
+            for i in range(iter_per_epoch):
+                inputs, labels = self._get_inputs(data_iter)
 
-                    predictions, classes = self.predict(inputs, return_classes=True)
+                predictions, classes = self.predict(inputs, return_classes=True)
 
-                    optim.zero_grad()
-                    loss = loss_fn(predictions, labels)
-                    loss.backward()
-                    optim.step()
+                optim.zero_grad()
+                loss = loss_fn(predictions, labels)
+                loss.backward()
+                optim.step()
 
-                    self._accumulate_results(self.to_np(labels).squeeze(),
-                                             classes,
-                                             loss=loss.data[0],
-                                             probs=self.to_np(predictions).squeeze())
+                self._accumulate_results(self.to_np(labels).squeeze(),
+                                         classes,
+                                         loss=loss.data[0],
+                                         probs=self.to_np(predictions).squeeze())
             stats = self.evaluate(logger, validation_data_loader, loss_fn, switch_to_eval=True)
             is_best = stats["val_loss"] < best_loss
             best_loss = min(best_loss, stats["val_loss"])
@@ -322,14 +323,14 @@ class BaseAutoEncoder(BaseModel):
                 losses.append(loss.data[0])
 
         val_loss = sum(losses) / len(losses)
-        computed_metrics = {"val_loss": val_loss}
+        computed_metrics = {"val_loss": val_loss, "val_loss_sqrt": val_loss ** 0.5}
         return computed_metrics
 
     def evaluate(self, logger, loader, loss_fn=None, switch_to_eval=True):
         # aggregate results from training epoch.
         train_losses = self._predictions.pop("train_loss")
         train_loss = sum(train_losses) / len(train_losses)
-        train_metrics = {"train_loss": train_loss}
+        train_metrics = {"train_loss": train_loss, "train_loss_sqrt": train_loss ** 0.5}
 
         if switch_to_eval:
             self.eval()
@@ -344,12 +345,33 @@ class BaseAutoEncoder(BaseModel):
         self._reset_predictions_cache()
         return computed_metrics
 
+    @classmethod
+    def _get_heatmaps(cls, images):
+        images = [cv2.normalize(i.astype('float'), None, 0.0, 1.0, cv2.NORM_MINMAX) for i in images]
+        images = [np.round(i * 255).astype(np.uint8) for i in images]
+        images = [cv2.applyColorMap(i, cv2.COLORMAP_BONE) for i in images]
+        return images
+
+    def _log_images(self, inputs, targets, predictions, logger, start=0, top=3):
+        if all((inputs is None, targets is None, predictions is None)):
+            return
+        inputs = self.to_np(inputs)[start: start + top, :, :, :].mean(axis=1)
+        targets = self.to_np(targets)[start: start + top, :, :, :].mean(axis=1)
+        predictions = self.to_np(predictions)[start: start + top, :, :, :].mean(axis=1)
+        inputs = self._get_heatmaps(inputs)
+        targets = self._get_heatmaps(targets)
+        predictions = self._get_heatmaps(predictions)
+        images = {"inputs": inputs, "targets": targets, "predictions": predictions}
+        for k, v in images.items():
+            logger.image_summary(k, v, self._epoch + 1)
+
     def fit(self, optim, loss_fn, data_loader, validation_data_loader, num_epochs, logger):
         best_loss = float("inf")
         for e in progressbar(range(num_epochs)):
-            self._epoch = e
+            self._epoch = e + 1
             iter_per_epoch = len(data_loader)
             data_iter = iter(data_loader)
+            inputs, targets, predictions, start_point = None, None, None, random.randint(0, 10)
             for i in range(iter_per_epoch):
                 inputs, targets = self._get_inputs(data_iter)
 
@@ -362,6 +384,7 @@ class BaseAutoEncoder(BaseModel):
 
                 self._accumulate_results(None, None, loss=loss.data[0])
             stats = self.evaluate(logger, validation_data_loader, loss_fn, switch_to_eval=True)
+            self._log_images(inputs, targets, predictions, logger, start=start_point)
             is_best = stats["val_loss"] < best_loss
             best_loss = min(best_loss, stats["val_loss"])
             self.save("./models/%s_%s_fold_%s.mdl" % (self.model_name, str(e + 1), self.fold_number),

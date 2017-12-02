@@ -36,6 +36,8 @@ class Logger(object):
         img_summaries = []
         for i, img in enumerate(images):
             # Write the image to a string
+            # if image_order == "nchw":
+            #     img = np.transpose(img, (1, 2, 0))
 
             s = six.BytesIO()
             scipy.misc.toimage(img).save(s, format="png")

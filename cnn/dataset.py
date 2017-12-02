@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import os
+import random
 import matplotlib.pyplot as plt
 from tqdm import tqdm as progressbar
 from torchvision import transforms
@@ -21,21 +22,29 @@ class Rotate:
         self.angle = angle
         self.rnd = rnd
 
+    def _rotate_images(self, images):
+        if not self.standard_angle:
+            images = [ndimage.rotate(im, self.angle, axes=(1, 0), mode="nearest", reshape=False) for im in images]
+        else:
+            if self.angle == 90:
+                images = [np.rot90(im) for im in images]
+            elif self.angle == 180:
+                images = [np.rot90(np.rot90(im)) for im in images]
+            elif self.angle == 270:
+                images = [np.rot90(np.rot90(np.rot90(im))) for im in images]
+            else:
+                raise ProjectException("Invalid angle!")
+        return images
+
     def __call__(self, item):
         image = item["inputs"]
         channels = image.shape[0]
-        planes = [image[i, :, :] for i in range(channels)]
-        if not self.standard_angle:
-            images = [ndimage.rotate(im, self.angle, axes=(1, 0), mode="nearest", reshape=False) for im in planes]
+        images = [image[i, :, :] for i in range(channels)]
+        if self.rnd:
+            if random.random() > 0.5:
+                images = self._rotate_images(images)
         else:
-            if self.angle == 90:
-                images = [np.rot90(im) for im in planes]
-            elif self.angle == 180:
-                images = [np.rot90(np.rot90(im)) for im in planes]
-            elif self.angle == 270:
-                images = [np.rot90(np.rot90(np.rot90(im))) for im in planes]
-            else:
-                raise ProjectException("Invalid angle!")
+            images = self._rotate_images(images)
         image = np.stack(images, axis=0)
         item["inputs"] = image
         return item
@@ -46,9 +55,18 @@ class Flip:
         self.axis = axis
         self.rnd = rnd
 
+    def _flip_image(self, image):
+        image = np.flip(image, axis=self.axis).copy()
+        return image
+
     def __call__(self, item):
         image = item["inputs"]
-        item["inputs"] = np.flip(image, axis=self.axis).copy()
+        if self.rnd:
+            if random.random() > 0.5:
+                image = self._flip_image(image)
+        else:
+            image = self._flip_image(image)
+        item["inputs"] = image
         return item
 
 
@@ -210,12 +228,10 @@ class IcebergDataset(BaseDataset):
         elif algo == "median":
             new_image = ndimage.median_filter(image, 3)
         else:
-            raise Exception("Unknown algorithm. Use one of (gauss, median)")
+            raise ProjectException("Unknown algorithm. Use one of (gauss, median)")
         return new_image
 
-    def vis(self, idx, average=False, prefix=""):
-        base_dir = self.im_dir or "./"
-        image = self[idx]["inputs"]
+    def _vis_image(self, idx, image, average, base_dir, prefix):
         if not isinstance(image, np.ndarray):
             image = image.numpy()
         if not self.inference_only:
@@ -236,6 +252,11 @@ class IcebergDataset(BaseDataset):
             for c in range(channels):
                 self._make_heatmap(image_planes[c], paths[c], label=label, angle=angle,
                                    mu=mu_sigmas[c][0], sigma=mu_sigmas[c][1], med=mu_sigmas[c][2])
+
+    def vis(self, idx, average=False, prefix=""):
+        base_dir = self.im_dir or "./"
+        image = self[idx]["inputs"]
+        self._vis_image(idx, image, average, base_dir, prefix)
 
 
 def _test_set():
