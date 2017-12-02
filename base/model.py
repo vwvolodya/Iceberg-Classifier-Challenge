@@ -310,18 +310,19 @@ class BaseAutoEncoder(BaseModel):
         inputs, targets = cls.to_var(inputs), cls.to_var(targets)
         return inputs, targets
 
-    def _eval_on_validation(self, loader, loss_fn):
+    def _eval_on_validation(self, loader, loss_fn, logger):
         iterator = iter(loader)
         iter_per_epoch = len(loader)
 
         losses = []
+        inputs, targets, probs = None, None, None
         for i in range(iter_per_epoch):
             inputs, targets = self._get_inputs(iterator)
             probs = self.predict(inputs)
             if loss_fn:
                 loss = loss_fn(probs, targets)
                 losses.append(loss.data[0])
-
+        self._log_images(inputs, targets, probs, logger, prefix="val_")
         val_loss = sum(losses) / len(losses)
         computed_metrics = {"val_loss": val_loss, "val_loss_sqrt": val_loss ** 0.5}
         return computed_metrics
@@ -334,7 +335,7 @@ class BaseAutoEncoder(BaseModel):
 
         if switch_to_eval:
             self.eval()
-        computed_metrics = self._eval_on_validation(loader, loss_fn)
+        computed_metrics = self._eval_on_validation(loader, loss_fn, logger)
         if switch_to_eval:
             # switch back to train
             self.train()
@@ -352,7 +353,7 @@ class BaseAutoEncoder(BaseModel):
         images = [cv2.applyColorMap(i, cv2.COLORMAP_BONE) for i in images]
         return images
 
-    def _log_images(self, inputs, targets, predictions, logger, start=0, top=3):
+    def _log_images(self, inputs, targets, predictions, logger, start=0, top=3, prefix=""):
         if all((inputs is None, targets is None, predictions is None)):
             return
         inputs = self.to_np(inputs)[start: start + top, :, :, :].mean(axis=1)
@@ -361,7 +362,9 @@ class BaseAutoEncoder(BaseModel):
         inputs = self._get_heatmaps(inputs)
         targets = self._get_heatmaps(targets)
         predictions = self._get_heatmaps(predictions)
-        images = {"inputs": inputs, "targets": targets, "predictions": predictions}
+        images = {prefix + "inputs": inputs,
+                  prefix + "targets": targets,
+                  prefix + "predictions": predictions}
         for k, v in images.items():
             logger.image_summary(k, v, self._epoch + 1)
 
@@ -383,8 +386,8 @@ class BaseAutoEncoder(BaseModel):
                 optim.step()
 
                 self._accumulate_results(None, None, loss=loss.data[0])
+            self._log_images(inputs, targets, predictions, logger, start=start_point, prefix="train_")
             stats = self.evaluate(logger, validation_data_loader, loss_fn, switch_to_eval=True)
-            self._log_images(inputs, targets, predictions, logger, start=start_point)
             is_best = stats["val_loss"] < best_loss
             best_loss = min(best_loss, stats["val_loss"])
             self.save("./models/%s_%s_fold_%s.mdl" % (self.model_name, str(e + 1), self.fold_number),

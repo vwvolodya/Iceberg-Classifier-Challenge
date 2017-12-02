@@ -213,15 +213,38 @@ def _train_auto_encoders():
     test_b_size = 64
     num_planes = 2
     scores = []
-    t = transforms.Compose([Flip(axis=1, rnd=True), Rotate(90, rnd=True),
-                            Flip(axis=2, rnd=True), Rotate(180, rnd=True), ToTensor()])
+
+    one_transform = transforms.Compose(
+        [
+            Flip(axis=2, targets_also=True, rnd=True),
+            Flip(axis=1, targets_also=True, rnd=True),
+            Rotate(90, targets_also=True, rnd=True),
+            Rotate(180, targets_also=True, rnd=True),
+            ToTensor()
+        ]
+    )
+    t1 = ToTensor()
+
+    t2 = transforms.Compose([Flip(axis=2, targets_also=True), ToTensor()])
+    t3 = transforms.Compose([Flip(axis=1, targets_also=True), ToTensor()])
+    t4 = transforms.Compose([Flip(axis=2, targets_also=True), Flip(axis=1, targets_also=True), ToTensor()])
+
+    t5 = transforms.Compose([Rotate(90, targets_also=True), ToTensor()])
+    t6 = transforms.Compose([Rotate(180, targets_also=True), ToTensor()])
+    t7 = transforms.Compose([Rotate(270, targets_also=True), ToTensor()])
+    t8 = transforms.Compose([Rotate(90, targets_also=True), Flip(axis=1), ToTensor()])
+    t9 = transforms.Compose([Rotate(180, targets_also=True), Flip(axis=2, targets_also=True), ToTensor()])
+    t10 = transforms.Compose([Rotate(270, targets_also=True), Flip(axis=1, targets_also=True),
+                              Flip(axis=1, targets_also=True), ToTensor()])
+    all_transformations = [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10]
+
     loss_func = nn.MSELoss()
     for f in range(n_folds):
         main_logger = Logger("../logs/enc/%s" % f, erase_folder_content=True)
-        train_set = AutoEncoderDataset("../data/folds/train_%s.npy" % f, transform=t, top=top)
-        train_loader = DataLoader(train_set, batch_size=train_bsize, num_workers=12, pin_memory=True)
+        train_set = AutoEncoderDataset("../data/folds/train_%s.npy" % f, transform=one_transform, top=top)
+        train_loader = DataLoader(train_set, batch_size=train_bsize, num_workers=1, pin_memory=True, shuffle=True)
         val_set = AutoEncoderDataset("../data/folds/test_%s.npy" % f, transform=ToTensor(), top=val_top)
-        val_loader = DataLoader(val_set, batch_size=test_b_size, num_workers=6, pin_memory=True)
+        val_loader = DataLoader(val_set, batch_size=test_b_size, num_workers=1, pin_memory=True)
 
         encoder = IcebergEncoder(num_planes, fold_number=f)
         if torch.cuda.is_available():

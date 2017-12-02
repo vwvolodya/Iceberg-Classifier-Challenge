@@ -17,10 +17,11 @@ MED_Q = {'med1': -21.0596, 'med2': -26.3451, 'q1_1': -24.1442, 'q1_2': -28.3731,
 
 
 class Rotate:
-    def __init__(self, angle, rnd=False):
+    def __init__(self, angle, rnd=False, targets_also=False):
         self.standard_angle = angle in [90, 180, 270]
         self.angle = angle
         self.rnd = rnd
+        self.targets_also = targets_also
 
     def _rotate_images(self, images):
         if not self.standard_angle:
@@ -38,22 +39,32 @@ class Rotate:
 
     def __call__(self, item):
         image = item["inputs"]
+        targets = item["targets"]
+        t_channels = targets.shape[0]
+        targets = [targets[i, :, :] for i in range(t_channels)]
         channels = image.shape[0]
         images = [image[i, :, :] for i in range(channels)]
         if self.rnd:
             if random.random() > 0.5:
                 images = self._rotate_images(images)
+                if self.targets_also:
+                    targets = self._rotate_images(targets)
         else:
             images = self._rotate_images(images)
+            if self.targets_also:
+                targets = self._rotate_images(targets)
         image = np.stack(images, axis=0)
+        targets = np.stack(targets, axis=0)
         item["inputs"] = image
+        item["targets"] = targets
         return item
 
 
 class Flip:
-    def __init__(self, axis=2, rnd=False):
+    def __init__(self, axis=2, rnd=False, targets_also=False):
         self.axis = axis
         self.rnd = rnd
+        self.targets_also = targets_also
 
     def _flip_image(self, image):
         image = np.flip(image, axis=self.axis).copy()
@@ -61,12 +72,18 @@ class Flip:
 
     def __call__(self, item):
         image = item["inputs"]
+        target = item["targets"]
         if self.rnd:
             if random.random() > 0.5:
                 image = self._flip_image(image)
+                if self.targets_also:
+                    target = self._flip_image(target)
         else:
             image = self._flip_image(image)
+            if self.targets_also:
+                target = self._flip_image(target)
         item["inputs"] = image
+        item["targets"] = target
         return item
 
 
