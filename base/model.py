@@ -9,6 +9,7 @@ from tqdm import tqdm as progressbar
 from torch.autograd import Variable
 from collections import defaultdict
 from pprint import pformat
+from base.exceptions import ProjectException
 
 
 class BaseModel(nn.Module):
@@ -157,7 +158,7 @@ class BaseModel(nn.Module):
             positional = model_params["args"]
             named = model_params["kwargs"]
         else:
-            raise Exception("No model params found. Cannot create instance of class!")
+            raise ProjectException("No model params found. Cannot create instance of class!")
         print("Going to restore model from params:\n%s %s from epoch %s with scores \n"
               "%s" %(positional, named, epoch, scores))
         instance = cls(*positional, **named)
@@ -281,6 +282,85 @@ class BaseBinaryClassifier(BaseModel):
                                              classes,
                                              loss=loss.data[0],
                                              probs=self.to_np(predictions).squeeze())
+            stats = self.evaluate(logger, validation_data_loader, loss_fn, switch_to_eval=True)
+            is_best = stats["val_loss"] < best_loss
+            best_loss = min(best_loss, stats["val_loss"])
+            self.save("./models/%s_%s_fold_%s.mdl" % (self.model_name, str(e + 1), self.fold_number),
+                      optim, is_best, scores=stats)
+        return best_loss
+
+
+class BaseAutoEncoder(BaseModel):
+    @abc.abstractmethod
+    def forward(self, *args, **kwargs):
+        pass
+
+    def _compute_metrics(self, target_y, pred_y, predictions_are_classes=True, training=True):
+        pass
+
+    def predict(self, x, **kwargs):
+        predictions = self.__call__(x)
+        return predictions
+
+    @classmethod
+    def _get_inputs(cls, iterator):
+        next_batch = next(iterator)
+        inputs, targets = next_batch["inputs"], next_batch["targets"]
+        inputs, targets = cls.to_var(inputs), cls.to_var(targets)
+        return inputs, targets
+
+    def _eval_on_validation(self, loader, loss_fn):
+        iterator = iter(loader)
+        iter_per_epoch = len(loader)
+
+        losses = []
+        for i in range(iter_per_epoch):
+            inputs, targets = self._get_inputs(iterator)
+            probs = self.predict(inputs)
+            if loss_fn:
+                loss = loss_fn(probs, targets)
+                losses.append(loss.data[0])
+
+        val_loss = sum(losses) / len(losses)
+        computed_metrics = {"val_loss": val_loss}
+        return computed_metrics
+
+    def evaluate(self, logger, loader, loss_fn=None, switch_to_eval=True):
+        # aggregate results from training epoch.
+        train_losses = self._predictions.pop("train_loss")
+        train_loss = sum(train_losses) / len(train_losses)
+        train_metrics = {"train_loss": train_loss}
+
+        if switch_to_eval:
+            self.eval()
+        computed_metrics = self._eval_on_validation(loader, loss_fn)
+        if switch_to_eval:
+            # switch back to train
+            self.train()
+
+        self._log_and_reset(logger, data=train_metrics, log_grads=True)
+        self._log_and_reset(logger, data=computed_metrics, log_grads=False)
+
+        self._reset_predictions_cache()
+        return computed_metrics
+
+    def fit(self, optim, loss_fn, data_loader, validation_data_loader, num_epochs, logger):
+        best_loss = float("inf")
+        for e in progressbar(range(num_epochs)):
+            self._epoch = e
+            iter_per_epoch = len(data_loader)
+            data_iter = iter(data_loader)
+            for i in range(iter_per_epoch):
+                inputs, targets = self._get_inputs(data_iter)
+
+                predictions = self.predict(inputs)
+
+                optim.zero_grad()
+                loss = loss_fn(predictions, targets)
+                loss.backward()
+                optim.step()
+
+                self._accumulate_results(None, None, loss=loss.data[0])
             stats = self.evaluate(logger, validation_data_loader, loss_fn, switch_to_eval=True)
             is_best = stats["val_loss"] < best_loss
             best_loss = min(best_loss, stats["val_loss"])

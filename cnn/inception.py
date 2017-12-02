@@ -90,9 +90,8 @@ class Inception(BaseBinaryClassifier):
 
         self.out_block = BasicConv2d(inner, output_features, kernel_size=1)
 
-        self.fc1 = nn.Linear(output_features * 4 * 4, fc1, bias=False)
+        self.fc1 = nn.Linear(output_features * 4 * 4, fc1, bias=True)
         self.fc2 = nn.Linear(fc1, num_classes)
-        self.bn1 = nn.BatchNorm1d(fc1, momentum=momentum)
         nn.init.xavier_normal(self.fc1.weight, gain=gain)
         nn.init.xavier_normal(self.fc2.weight, gain=gain)
 
@@ -109,7 +108,6 @@ class Inception(BaseBinaryClassifier):
 
         out = out.view(out.size(0), -1)
         out = self.fc1(out)
-        out = self.bn1(out)
         out = self.activation(out)
         out = self.fc2(out)
         out = self.sigmoid(out)

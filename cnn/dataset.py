@@ -6,6 +6,7 @@ from tqdm import tqdm as progressbar
 from torchvision import transforms
 from scipy import ndimage, signal
 from base.dataset import BaseDataset, ToTensor
+from base.exceptions import ProjectException
 
 
 # scaler params computed on dataset
@@ -15,9 +16,10 @@ MED_Q = {'med1': -21.0596, 'med2': -26.3451, 'q1_1': -24.1442, 'q1_2': -28.3731,
 
 
 class Rotate:
-    def __init__(self, angle):
+    def __init__(self, angle, rnd=False):
         self.standard_angle = angle in [90, 180, 270]
         self.angle = angle
+        self.rnd = rnd
 
     def __call__(self, item):
         image = item["inputs"]
@@ -33,15 +35,16 @@ class Rotate:
             elif self.angle == 270:
                 images = [np.rot90(np.rot90(np.rot90(im))) for im in planes]
             else:
-                raise Exception("Invalid angle!")
+                raise ProjectException("Invalid angle!")
         image = np.stack(images, axis=0)
         item["inputs"] = image
         return item
 
 
 class Flip:
-    def __init__(self, axis=2):
+    def __init__(self, axis=2, rnd=False):
         self.axis = axis
+        self.rnd = rnd
 
     def __call__(self, item):
         image = item["inputs"]

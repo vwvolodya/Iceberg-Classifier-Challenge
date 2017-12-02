@@ -50,7 +50,7 @@ class ModelTrainer:
         return res
 
     def train_all(self, config, epochs, transformations):
-        main_logger = self.logger_class("../logs")
+        main_logger = self.logger_class("../logs", erase_folder_content=False)
         net = LeNet(self.num_feature_planes, config["conv"], config["fc1"], None, fold_number=None,
                     gain=config["gain"], model_prefix="final")
 
@@ -88,11 +88,12 @@ class ModelTrainer:
         scores = []
 
         for f in range(self.num_folds):
-            main_logger = self.logger_class("../logs/%s" % f)
+            main_logger = self.logger_class("../logs/%s" % f, erase_folder_content=True)
 
             model_prefix = str(hash(str(config)))
-            net = LeNet(self.num_feature_planes, config["conv"], config["fc1"], momentum=config["momentum"],
-                        fold_number=f, gain=config["gain"], model_prefix=model_prefix)
+            net = self.model_class(self.num_feature_planes, config["conv"], 16, config["fc1"],
+                                   momentum=config["momentum"], fold_number=f, gain=config["gain"],
+                                   model_prefix=model_prefix)
 
             if torch.cuda.is_available():
                 net.cuda()
@@ -159,7 +160,8 @@ if __name__ == "__main__":
         "fc2": 256, "train_batch_size": 512, "test_batch_size": 64, "momentum": 0.5
     }
     best_config_inception = {
-        "lr": 0.0001, "gain": 0.1, "conv": 48, "lambda": 5e-5, "fc1": None, "fc2": None
+        "lr": 0.0001, "gain": 0.01, "conv": 24, "lambda": 0, "fc1": 16, "train_batch_size": 256,
+        "test_batch_size": 64, "momentum": 0.125
     }
     n_folds = 4
     top = None
@@ -194,8 +196,8 @@ if __name__ == "__main__":
 
     loss_func = nn.BCELoss()
 
-    trainer = ModelTrainer(num_planes, LeNet, loss_func, n_folds, Logger, train_top=top, test_top=val_top)
-    loss_scores = trainer.random_search(25, parameter_grid, train_epochs=20, transformations=all_transformations)
-    # loss_scores = trainer.train_one_configuration(best_config, 20, all_transformations)
+    trainer = ModelTrainer(num_planes, Inception, loss_func, n_folds, Logger, train_top=top, test_top=val_top)
+    # loss_scores = trainer.random_search(25, parameter_grid, train_epochs=20, transformations=all_transformations)
+    loss_scores = trainer.train_one_configuration(best_config_inception, 40, all_transformations)
     # trainer.train_all(best_config, 30, all_transformations)
     print(loss_scores)
