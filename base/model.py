@@ -322,7 +322,7 @@ class BaseAutoEncoder(BaseModel):
             if loss_fn:
                 loss = loss_fn(probs, targets)
                 losses.append(loss.data[0])
-        self._log_images(inputs, targets, probs, logger, prefix="val_")
+        self._log_images(inputs, targets, probs, logger, prefix="val_", reshape=(2, 75, 75))
         val_loss = sum(losses) / len(losses)
         computed_metrics = {"val_loss": val_loss, "val_loss_sqrt": val_loss ** 0.5}
         return computed_metrics
@@ -353,15 +353,22 @@ class BaseAutoEncoder(BaseModel):
         images = [cv2.applyColorMap(i, cv2.COLORMAP_BONE) for i in images]
         return images
 
-    def _log_images(self, inputs, targets, predictions, logger, start=0, top=3, prefix=""):
+    def _process_item(self, item, start, top, reshape):
+        image = self.to_np(item)
+        if reshape:
+            num_images = (image.shape[0],)
+            new_shape = num_images + reshape
+            image = np.reshape(image, new_shape)
+        image = image[start: start + top, :, :, :].mean(axis=1)
+        image = self._get_heatmaps(image)
+        return image
+
+    def _log_images(self, inputs, targets, predictions, logger, start=0, top=3, prefix="", reshape=None):
         if all((inputs is None, targets is None, predictions is None)):
             return
-        inputs = self.to_np(inputs)[start: start + top, :, :, :].mean(axis=1)
-        targets = self.to_np(targets)[start: start + top, :, :, :].mean(axis=1)
-        predictions = self.to_np(predictions)[start: start + top, :, :, :].mean(axis=1)
-        inputs = self._get_heatmaps(inputs)
-        targets = self._get_heatmaps(targets)
-        predictions = self._get_heatmaps(predictions)
+        inputs = self._process_item(inputs, start, top, reshape)
+        targets = self._process_item(targets, start, top, reshape)
+        predictions = self._process_item(predictions, start, top, reshape)
         images = {prefix + "inputs": inputs,
                   prefix + "targets": targets,
                   prefix + "predictions": predictions}
@@ -370,11 +377,12 @@ class BaseAutoEncoder(BaseModel):
 
     def fit(self, optim, loss_fn, data_loader, validation_data_loader, num_epochs, logger):
         best_loss = float("inf")
+        start_point = random.randint(0, 32)
         for e in progressbar(range(num_epochs)):
             self._epoch = e + 1
             iter_per_epoch = len(data_loader)
             data_iter = iter(data_loader)
-            inputs, targets, predictions, start_point = None, None, None, random.randint(0, 10)
+            inputs, targets, predictions = None, None, None
             for i in range(iter_per_epoch):
                 inputs, targets = self._get_inputs(data_iter)
 
@@ -386,7 +394,8 @@ class BaseAutoEncoder(BaseModel):
                 optim.step()
 
                 self._accumulate_results(None, None, loss=loss.data[0])
-            self._log_images(inputs, targets, predictions, logger, start=start_point, prefix="train_")
+            self._log_images(inputs, targets, predictions, logger, start=start_point,
+                             prefix="train_", reshape=(2, 75, 75))
             stats = self.evaluate(logger, validation_data_loader, loss_fn, switch_to_eval=True)
             is_best = stats["val_loss"] < best_loss
             best_loss = min(best_loss, stats["val_loss"])

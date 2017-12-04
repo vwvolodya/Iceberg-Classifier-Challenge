@@ -10,7 +10,7 @@ class AutoEncoderDataset(IcebergDataset):
             image = self._add_planes(image)
         elif self.add_feature_planes == "simple":
             image = self._get_simple_planes(image)
-        noise_factor = 0.3
+        noise_factor = 0.4
         planes = [image[i, :, :] for i in range(image.shape[0])]
         stats = [self.get_image_stat(i) for i in planes]
         masks = [np.random.binomial(1, 1 - noise_factor, i.shape) for i in planes]

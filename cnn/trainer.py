@@ -3,10 +3,10 @@ import pandas as pd
 import torch
 from torch import nn
 from base.logger import Logger
-from cnn.dataset import IcebergDataset, ToTensor, Flip, Rotate
+from cnn.dataset import IcebergDataset, ToTensor, Flip, Rotate, Ravel
 from cnn.model import LeNet
 from cnn.inception import Inception
-from cnn.auto_encoder import IcebergEncoder
+from cnn.auto_encoder import IcebergEncoder, VariationalAutoEncoder
 from cnn.aenc_dataset import AutoEncoderDataset
 from torch.utils.data import DataLoader, ConcatDataset
 from torchvision import transforms
@@ -220,9 +220,14 @@ def _train_auto_encoders():
             Flip(axis=1, targets_also=True, rnd=True),
             Rotate(90, targets_also=True, rnd=True),
             Rotate(180, targets_also=True, rnd=True),
+            # Ravel(),
             ToTensor()
         ]
     )
+    val_transform = transforms.Compose([
+        # Ravel(),
+        ToTensor()
+    ])
     t1 = ToTensor()
 
     t2 = transforms.Compose([Flip(axis=2, targets_also=True), ToTensor()])
@@ -242,16 +247,16 @@ def _train_auto_encoders():
     for f in range(n_folds):
         main_logger = Logger("../logs/enc/%s" % f, erase_folder_content=True)
         train_set = AutoEncoderDataset("../data/folds/train_%s.npy" % f, transform=one_transform, top=top)
-        train_loader = DataLoader(train_set, batch_size=train_bsize, num_workers=1, pin_memory=True, shuffle=True)
-        val_set = AutoEncoderDataset("../data/folds/test_%s.npy" % f, transform=ToTensor(), top=val_top)
-        val_loader = DataLoader(val_set, batch_size=test_b_size, num_workers=1, pin_memory=True)
+        train_loader = DataLoader(train_set, batch_size=train_bsize, num_workers=12, pin_memory=True, shuffle=True)
+        val_set = AutoEncoderDataset("../data/folds/test_%s.npy" % f, transform=val_transform, top=val_top)
+        val_loader = DataLoader(val_set, batch_size=test_b_size, num_workers=6, pin_memory=True)
 
         encoder = IcebergEncoder(num_planes, fold_number=f)
         if torch.cuda.is_available():
             encoder.cuda()
             loss_func.cuda()
-        optim = torch.optim.Adam(encoder.parameters(), lr=0.0001, weight_decay=0.005)
-        best = encoder.fit(optim, loss_func, train_loader, val_loader, 100, logger=main_logger)
+        optim = torch.optim.Adam(encoder.parameters(), lr=0.0001, weight_decay=0)
+        best = encoder.fit(optim, loss_func, train_loader, val_loader, 250, logger=main_logger)
         scores.append(best)
         print()
         print("Best was ", best)

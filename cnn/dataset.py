@@ -16,6 +16,16 @@ MU_SIGMA = {"mu1": -20.655831, "mu2": -26.320702, "sigma1": 5.200838, "sigma2": 
 MED_Q = {'med1': -21.0596, 'med2': -26.3451, 'q1_1': -24.1442, 'q1_2': -28.3731, 'q3_1': -17.5402, 'q3_2': -24.3858}
 
 
+class Ravel:
+    def __call__(self, item):
+        image = item["inputs"]
+        targets = item["targets"]
+        image = image.ravel()
+        targets = targets.ravel()
+        item = {"inputs": image, "targets": targets}
+        return item
+
+
 class Rotate:
     def __init__(self, angle, rnd=False, targets_also=False):
         self.standard_angle = angle in [90, 180, 270]
