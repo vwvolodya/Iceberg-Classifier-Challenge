@@ -3,6 +3,7 @@ import pandas as pd
 import torch
 from torch import nn
 from base.logger import Logger
+from torch.nn import functional as F
 from cnn.dataset import IcebergDataset, ToTensor, Flip, Rotate, Ravel
 from cnn.model import LeNet
 from cnn.inception import Inception
@@ -205,8 +206,22 @@ def _train_classifiers():
     print(loss_scores)
 
 
+def loss_function(recon_x, x, mu, logvar):
+    BCE = F.binary_cross_entropy(recon_x, x)
+    batch_size = x.size(0)
+    # see Appendix B from VAE paper:
+    # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
+    # https://arxiv.org/abs/1312.6114
+    # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    # Normalise by same number of elements as in reconstruction
+    KLD /= batch_size * 2 * 75 * 75
+
+    return BCE + KLD
+
+
 def _train_auto_encoders():
-    n_folds = 4
+    n_folds = 1
     top = None
     val_top = None
     train_bsize = 256
@@ -220,12 +235,12 @@ def _train_auto_encoders():
             Flip(axis=1, targets_also=True, rnd=True),
             Rotate(90, targets_also=True, rnd=True),
             Rotate(180, targets_also=True, rnd=True),
-            # Ravel(),
+            Ravel(),
             ToTensor()
         ]
     )
     val_transform = transforms.Compose([
-        # Ravel(),
+        Ravel(),
         ToTensor()
     ])
     t1 = ToTensor()
@@ -243,20 +258,18 @@ def _train_auto_encoders():
                               Flip(axis=1, targets_also=True), ToTensor()])
     all_transformations = [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10]
 
-    loss_func = nn.MSELoss()
     for f in range(n_folds):
-        main_logger = Logger("../logs/enc/%s" % f, erase_folder_content=True)
-        train_set = AutoEncoderDataset("../data/folds/train_%s.npy" % f, transform=one_transform, top=top)
+        main_logger = Logger("../logs/enc/", erase_folder_content=False)
+        train_set = AutoEncoderDataset("../data/all.npy", transform=one_transform, top=top)
         train_loader = DataLoader(train_set, batch_size=train_bsize, num_workers=12, pin_memory=True, shuffle=True)
-        val_set = AutoEncoderDataset("../data/folds/test_%s.npy" % f, transform=val_transform, top=val_top)
+        val_set = AutoEncoderDataset("../data/folds/test_1.npy", transform=val_transform, top=val_top)
         val_loader = DataLoader(val_set, batch_size=test_b_size, num_workers=6, pin_memory=True)
 
-        encoder = IcebergEncoder(num_planes, fold_number=f)
+        encoder = VariationalAutoEncoder(num_planes, fold_number=None)
         if torch.cuda.is_available():
             encoder.cuda()
-            loss_func.cuda()
-        optim = torch.optim.Adam(encoder.parameters(), lr=0.0001, weight_decay=0)
-        best = encoder.fit(optim, loss_func, train_loader, val_loader, 250, logger=main_logger)
+        optim = torch.optim.Adam(encoder.parameters(), lr=0.001, weight_decay=0)
+        best = encoder.fit(optim, loss_function, train_loader, val_loader, 100, logger=main_logger)
         scores.append(best)
         print()
         print("Best was ", best)

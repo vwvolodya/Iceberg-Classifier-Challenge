@@ -265,7 +265,7 @@ class BaseBinaryClassifier(BaseModel):
     def fit(self, optim, loss_fn, data_loader, validation_data_loader, num_epochs, logger):
         best_loss = float("inf")
         for e in progressbar(range(num_epochs)):
-            self._epoch = e + 1
+            self._epoch = e
 
             iter_per_epoch = len(data_loader)
             data_iter = iter(data_loader)
@@ -318,20 +318,20 @@ class BaseAutoEncoder(BaseModel):
         inputs, targets, probs = None, None, None
         for i in range(iter_per_epoch):
             inputs, targets = self._get_inputs(iterator)
-            probs = self.predict(inputs)
+            probs, mu, logvar = self.predict(targets)
             if loss_fn:
-                loss = loss_fn(probs, targets)
+                loss = loss_fn(probs, targets, mu, logvar)
                 losses.append(loss.data[0])
         self._log_images(inputs, targets, probs, logger, prefix="val_", reshape=(2, 75, 75))
         val_loss = sum(losses) / len(losses)
-        computed_metrics = {"val_loss": val_loss, "val_loss_sqrt": val_loss ** 0.5}
+        computed_metrics = {"val_loss": val_loss}
         return computed_metrics
 
     def evaluate(self, logger, loader, loss_fn=None, switch_to_eval=True):
         # aggregate results from training epoch.
         train_losses = self._predictions.pop("train_loss")
         train_loss = sum(train_losses) / len(train_losses)
-        train_metrics = {"train_loss": train_loss, "train_loss_sqrt": train_loss ** 0.5}
+        train_metrics = {"train_loss": train_loss}
 
         if switch_to_eval:
             self.eval()
@@ -379,17 +379,17 @@ class BaseAutoEncoder(BaseModel):
         best_loss = float("inf")
         start_point = random.randint(0, 32)
         for e in progressbar(range(num_epochs)):
-            self._epoch = e + 1
+            self._epoch = e
             iter_per_epoch = len(data_loader)
             data_iter = iter(data_loader)
             inputs, targets, predictions = None, None, None
             for i in range(iter_per_epoch):
                 inputs, targets = self._get_inputs(data_iter)
 
-                predictions = self.predict(inputs)
+                predictions, mu, logvar = self.predict(targets)
 
                 optim.zero_grad()
-                loss = loss_fn(predictions, targets)
+                loss = loss_fn(predictions, targets, mu, logvar)
                 loss.backward()
                 optim.step()
 

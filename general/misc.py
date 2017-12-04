@@ -1,6 +1,13 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, train_test_split
+
+
+def simple_split(path):
+    data = np.load(path)
+    train, test = train_test_split(data, test_size=0.2, random_state=101)
+    np.save("../data/for_train_encoder", train)
+    np.save("../data/for_test_encoder", test)
 
 
 def split(path, n_splits=5):
@@ -100,5 +107,6 @@ if __name__ == "__main__":
     #     np.save("../data/folds/train_%s" % i, tr)
     #     np.save("../data/folds/test_%s" % i, tt)
     # get_mu_sigma(original)
-    get_robust_stats(original)
+    # get_robust_stats(original)
+    simple_split("../data/encoder_train.npy")
     print("Finished!")

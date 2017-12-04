@@ -55,7 +55,7 @@ class Rotate:
         channels = image.shape[0]
         images = [image[i, :, :] for i in range(channels)]
         if self.rnd:
-            if random.random() > 0.5:
+            if random.random() > 0.6:
                 images = self._rotate_images(images)
                 if self.targets_also:
                     targets = self._rotate_images(targets)
@@ -84,7 +84,7 @@ class Flip:
         image = item["inputs"]
         target = item["targets"]
         if self.rnd:
-            if random.random() > 0.5:
+            if random.random() > 0.6:
                 image = self._flip_image(image)
                 if self.targets_also:
                     target = self._flip_image(target)

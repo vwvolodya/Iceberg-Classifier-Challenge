@@ -1,3 +1,5 @@
+from torch.autograd import Variable
+from torchvision import transforms
 from torch import nn
 from base.model import BaseAutoEncoder
 
@@ -92,44 +94,46 @@ class VariationalAutoEncoder(BaseAutoEncoder):
         input_size = 2 * 75 * 75
 
         self.activation = nn.Tanh()
-        self.fc1 = nn.Linear(input_size, 256, bias=True)
-        self.fc2 = nn.Linear(256, 32, bias=True)
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
+        self.fc1 = nn.Linear(input_size, 512, bias=True)
+        self.fc21 = nn.Linear(512, 32, bias=True)
+        self.fc22 = nn.Linear(512, 32, bias=True)
+        self.fc_02 = nn.Linear(32, 512, bias=True)
+        self.fc_01 = nn.Linear(512, input_size, bias=True)
+
         nn.init.xavier_normal(self.fc1.weight, gain=1)
-        nn.init.xavier_normal(self.fc2.weight, gain=1)
-        self.fc_02 = nn.Linear(32, 256, bias=True)
-        self.fc_01 = nn.Linear(256, input_size, bias=True)
-
-        self.fc_01.weight = self.fc1.weight
-        self.fc_02.weight = self.fc2.weight
-
-    def decode(self, x):
-        if self._encoder_shape is True:
-            self.fc1.weight.data.t_()
-            self.fc2.weight.data.t_()
-        out = self.fc_02(x)
-        out = self.activation(out)
-        out = self.fc_01(out)
-        out = self.activation(out)
-        self._encoder_shape = False
-        return out
+        nn.init.xavier_normal(self.fc21.weight, gain=1)
+        nn.init.xavier_normal(self.fc22.weight, gain=1)
+        nn.init.xavier_normal(self.fc_02.weight, gain=1)
+        nn.init.xavier_normal(self.fc_01.weight, gain=1)
 
     def encode(self, x):
-        if self._encoder_shape is False:
-            self.fc1.weight.data.t_()
-            self.fc2.weight.data.t_()
         out = self.fc1(x)
-        out = self.activation(out)
-        out = self.fc2(out)
-        out = self.activation(out)
-        self._encoder_shape = True
+        out = self.relu(out)
+        branch_1 = self.fc21(out)
+        branch_2 = self.fc22(out)
+        return branch_1, branch_2
+
+    def reparameterize(self, mu, logvar):
+        if self.training:
+            std = logvar.mul(0.5).exp_()
+            eps = Variable(std.data.new(std.size()).normal_())
+            return eps.mul(std).add_(mu)
+        else:
+            return mu
+
+    def decode(self, z):
+        out = self.fc_02(z)
+        out = self.relu(out)
+        out = self.fc_01(out)
+        out = self.sigmoid(out)
         return out
 
     def forward(self, x):
-        enc = self.encode(x)
-        if self._encoder_only:
-            return enc
-        dec = self.decode(enc)
-        return dec
+        mu, logvar = self.encode(x)
+        z = self.reparameterize(mu, logvar)
+        return self.decode(z), mu, logvar
 
 
 if __name__ == "__main__":
@@ -157,5 +161,41 @@ if __name__ == "__main__":
         losses = model.fit(opt, loss_fn, loader, val_loader, 10, log)
         print(losses)
 
-    dummy()
+    def infer():
+        from cnn.dataset import IcebergDataset, Ravel, ToTensor
+        from torch.utils.data import DataLoader
+        import torch
+        from tqdm import tqdm as progressbar
+        import numpy as np
+
+        val_transform = transforms.Compose([
+            Ravel(),
+            ToTensor()
+        ])
+        ds = IcebergDataset("../data/orig/test.json", transform=val_transform, add_feature_planes="no",
+                            inference_only=True)
+        ldr = DataLoader(ds, batch_size=256)
+        encoder = VariationalAutoEncoder.restore("./models/AutoEncoder_100_fold_None.mdl")
+        if torch.cuda.is_available():
+            encoder.cuda()
+        iterator = iter(ldr)
+        total_items = len(ds)
+        iter_per_epoch = len(ldr)
+        all_predictions = np.array([])
+        # all_labels = np.array([])
+        for _ in progressbar(range(iter_per_epoch)):
+            next_batch = next(iterator)
+            inputs = next_batch["inputs"]
+            inputs = encoder.to_var(inputs)
+            result, _ = encoder.encode(inputs)
+            res = encoder.to_np(result)
+            all_predictions = np.append(all_predictions, res)
+            # labels = encoder.to_np(targets)
+            # all_labels = np.append(all_labels, labels)
+
+        all_predictions = all_predictions.reshape(total_items, 32)
+        # final = np.column_stack((all_predictions, all_labels))
+        np.save("../data/encoder_test", all_predictions)
+
+    infer()
     print("Done!")
