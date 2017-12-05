@@ -51,7 +51,8 @@ class Rotate:
         image = item["inputs"]
         targets = item["targets"]
         t_channels = targets.shape[0]
-        targets = [targets[i, :, :] for i in range(t_channels)]
+        if self.targets_also:
+            targets = [targets[i, :, :] for i in range(t_channels)]
         channels = image.shape[0]
         images = [image[i, :, :] for i in range(channels)]
         if self.rnd:
@@ -64,7 +65,8 @@ class Rotate:
             if self.targets_also:
                 targets = self._rotate_images(targets)
         image = np.stack(images, axis=0)
-        targets = np.stack(targets, axis=0)
+        if self.targets_also:
+            targets = np.stack(targets, axis=0)
         item["inputs"] = image
         item["targets"] = targets
         return item

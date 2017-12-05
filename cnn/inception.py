@@ -73,7 +73,7 @@ class _InceptionE(nn.Module):
 
 class Inception(BaseBinaryClassifier):
     def __init__(self, num_feature_planes, inner, output_features, fc1, momentum=0.1, num_classes=1,
-                 fold_number=0, gain=0.01, model_prefix=""):
+                 fold_number=0, gain=0.1, model_prefix=""):
         positional = [num_feature_planes, inner, output_features, fc1]
         named = {"num_classes": num_classes, "fold_number": fold_number, "gain": gain, "momentum": momentum}
         super().__init__(pos_params=positional, named_params=named, model_name="InceptionV",
@@ -84,13 +84,13 @@ class Inception(BaseBinaryClassifier):
         self.max_pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.inception_a = _InceptionA(num_feature_planes, inner, momentum=momentum)
-        self.inception_c = _InceptionC(inner, inner * 2, momentum=momentum)
+        self.inception_e_0 = _InceptionE(inner, inner * 2, momentum=momentum)
         self.inception_e_1 = _InceptionE(inner * 2, inner * 2, momentum=momentum)
         self.inception_e_2 = _InceptionE(inner * 2, inner, momentum=momentum)
 
-        self.out_block = BasicConv2d(inner, output_features, kernel_size=1)
+        # self.out_block = BasicConv2d(inner, output_features, kernel_size=1)
 
-        self.fc1 = nn.Linear(output_features * 4 * 4, fc1, bias=True)
+        self.fc1 = nn.Linear(inner * 4 * 4, fc1, bias=True)
         self.fc2 = nn.Linear(fc1, num_classes)
         nn.init.xavier_normal(self.fc1.weight, gain=gain)
         nn.init.xavier_normal(self.fc2.weight, gain=gain)
@@ -98,13 +98,13 @@ class Inception(BaseBinaryClassifier):
     def forward(self, x):
         out = self.inception_a(x)
         out = self.max_pool(out)
-        out = self.inception_c(out)
+        out = self.inception_e_0(out)
         out = self.max_pool(out)
         out = self.inception_e_1(out)
         out = self.max_pool(out)
         out = self.inception_e_2(out)
         out = self.max_pool(out)
-        out = self.out_block(out)
+        # out = self.out_block(out)
 
         out = out.view(out.size(0), -1)
         out = self.fc1(out)
@@ -116,7 +116,7 @@ class Inception(BaseBinaryClassifier):
 
 if __name__ == "__main__":
     a = torch.randn(4, 5, 75, 75)
-    inc = Inception(5, 24, 18, 16)
+    inc = Inception(5, 24, None, 128)
     a = Inception.to_var(a, use_gpu=False)
     res = inc.predict(a)
     print(res)
