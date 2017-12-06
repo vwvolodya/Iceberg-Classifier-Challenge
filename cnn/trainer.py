@@ -179,7 +179,6 @@ def _train_classifiers():
             Flip(axis=1, rnd=True),
             Rotate(90, rnd=True),
             Rotate(180, rnd=True),
-            # Ravel(),
             ToTensor()
         ]
     )

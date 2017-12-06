@@ -81,7 +81,7 @@ class Inception(BaseBinaryClassifier):
         self.fold_number = fold_number
         self.activation = nn.ELU(inplace=True)
         self.sigmoid = nn.Sigmoid()
-        self.max_pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.inception_a = _InceptionA(num_feature_planes, inner, momentum=momentum)
         self.inception_e_0 = _InceptionE(inner, inner * 2, momentum=momentum)
@@ -97,13 +97,13 @@ class Inception(BaseBinaryClassifier):
 
     def forward(self, x):
         out = self.inception_a(x)
-        out = self.max_pool(out)
+        out = self.pool(out)
         out = self.inception_e_0(out)
-        out = self.max_pool(out)
+        out = self.pool(out)
         out = self.inception_e_1(out)
-        out = self.max_pool(out)
+        out = self.pool(out)
         out = self.inception_e_2(out)
-        out = self.max_pool(out)
+        out = self.pool(out)
         # out = self.out_block(out)
 
         out = out.view(out.size(0), -1)

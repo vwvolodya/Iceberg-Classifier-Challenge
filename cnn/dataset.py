@@ -16,6 +16,18 @@ MU_SIGMA = {"mu1": -20.655831, "mu2": -26.320702, "sigma1": 5.200838, "sigma2": 
 MED_Q = {'med1': -21.0596, 'med2': -26.3451, 'q1_1': -24.1442, 'q1_2': -28.3731, 'q3_1': -17.5402, 'q3_2': -24.3858}
 
 
+class Scale:
+    def __init__(self, new_size):
+        self.new_size = new_size
+
+    def __call__(self, item):
+        image = item["inputs"]
+        c, h, w = image.shape
+        image = ndimage.zoom(image, (c, self.new_size, self.new_size), order=1)   # bilinear, 0 for nearest, 3 for cubic
+        item["inputs"] = image
+        return item
+
+
 class Ravel:
     def __call__(self, item):
         image = item["inputs"]
@@ -126,7 +138,7 @@ class IcebergDataset(BaseDataset):
         self.angle = self.data[:, 2]
         print_string = "Ds length %s \t" % self.data.shape[0]
         if not inference_only:
-            print_string += "Positive %s" % sum(self.y)
+            print_string += "Positive %s\n" % sum(self.y)
         print(print_string)
         self.num_feature_planes = 2     # by default
 
@@ -162,6 +174,12 @@ class IcebergDataset(BaseDataset):
             ch2_2d = (ch2_2d - MED_Q["med2"]) / (MED_Q["q3_2"] - MED_Q["q1_2"]) * multiplier / 3
         image = np.stack((ch1_2d, ch2_2d), axis=0)  # PyTorch uses NCHW ordering
         return image
+
+    def get_labels(self):
+        if not self.inference_only:
+            labels = self.y
+            return labels
+        raise ProjectException("Cannot get labels in inference mode. They are unknown!")
 
     @classmethod
     def __correlate(cls, im1, im2):

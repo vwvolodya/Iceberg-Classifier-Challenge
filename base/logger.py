@@ -12,6 +12,7 @@ class Logger(object):
         if erase_folder_content:
             self._empty_folder(log_dir)
         self.writer = tf.summary.FileWriter(log_dir)
+        self._log_dir = log_dir
 
     @classmethod
     def _empty_folder(cls, folder):
