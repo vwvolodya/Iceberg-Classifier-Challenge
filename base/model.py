@@ -12,11 +12,12 @@ from torch.autograd import Variable
 from collections import defaultdict
 from pprint import pformat
 from base.exceptions import ProjectException
+from base.config import ProjectConfig
 
 
 class BaseModel(nn.Module):
-    def __init__(self, pos_params, named_params, seed=10101, model_name=None, best_model_name="./models/best.mdl"):
-        self._best_model_name = best_model_name
+    def __init__(self, pos_params, named_params, seed=10101, model_name=None, best_model_name=""):
+        self._best_model_name = best_model_name or ProjectConfig.combine(ProjectConfig.model_directory, "best.mdl")
         self.model_name = model_name
         self._predictions = defaultdict(list)
         self._epoch = 0
@@ -162,7 +163,7 @@ class BaseModel(nn.Module):
         else:
             raise ProjectException("No model params found. Cannot create instance of class!")
         print("Going to restore model from params:\n%s %s from epoch %s with scores \n"
-              "%s" %(positional, named, epoch, scores))
+              "%s" % (positional, named, epoch, scores))
         instance = cls(*positional, **named)
         instance.load_state_dict(checkpoint['state_dict'])
         instance.eval()
@@ -221,6 +222,7 @@ class BaseBinaryClassifier(BaseModel):
         for i in range(iter_per_epoch):
             inputs, targets = self._get_inputs(iterator)
             probs, classes = self.predict(inputs, return_classes=True)
+            probs = self._cut_probabilities(probs)
             target_y = self.to_np(targets).squeeze()
             if loss_fn:
                 loss = loss_fn(probs, targets)
@@ -262,6 +264,12 @@ class BaseBinaryClassifier(BaseModel):
         self._reset_predictions_cache()
         return computed_metrics
 
+    @classmethod
+    def _cut_probabilities(cls, x):
+        x.data[x.data < 0.15] = 0
+        x.data[x.data > 0.85] = 1
+        return x
+
     def fit(self, optim, loss_fn, data_loader, validation_data_loader, num_epochs, logger):
         best_loss = float("inf")
         for e in progressbar(range(num_epochs)):
@@ -273,6 +281,7 @@ class BaseBinaryClassifier(BaseModel):
                 inputs, labels = self._get_inputs(data_iter)
 
                 predictions, classes = self.predict(inputs, return_classes=True)
+                predictions = self._cut_probabilities(predictions)
 
                 optim.zero_grad()
                 loss = loss_fn(predictions, labels)
@@ -286,8 +295,9 @@ class BaseBinaryClassifier(BaseModel):
             stats = self.evaluate(logger, validation_data_loader, loss_fn, switch_to_eval=True)
             is_best = stats["val_loss"] < best_loss
             best_loss = min(best_loss, stats["val_loss"])
-            self.save("./models/%s_%s_fold_%s.mdl" % (self.model_name, str(e + 1), self.fold_number),
-                      optim, is_best, scores=stats)
+            model_path = ProjectConfig.combine(ProjectConfig.model_directory,
+                                               "%s_%s_fold_%s.mdl" % (self.model_name, str(e + 1), self.fold_number))
+            self.save(model_path, optim, is_best, scores=stats)
         return best_loss
 
 
@@ -399,6 +409,7 @@ class BaseAutoEncoder(BaseModel):
             stats = self.evaluate(logger, validation_data_loader, loss_fn, switch_to_eval=True)
             is_best = stats["val_loss"] < best_loss
             best_loss = min(best_loss, stats["val_loss"])
-            self.save("./models/%s_%s_fold_%s.mdl" % (self.model_name, str(e + 1), self.fold_number),
-                      optim, is_best, scores=stats)
+            model_path = ProjectConfig.combine(ProjectConfig.model_directory,
+                                               "%s_%s_fold_%s.mdl" % (self.model_name, str(e + 1), self.fold_number))
+            self.save(model_path, optim, is_best, scores=stats)
         return best_loss

@@ -1,17 +1,23 @@
 import os
 import errno
-from base.logger import Logger
+from tensorboardX import SummaryWriter
 
 
 class ProjectConfig:
     base_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
     logger_directory = os.path.join(base_dir, "logs")
+    model_directory = os.path.join(base_dir, "models")
     fold_number = 4
     data_directory = os.path.join(base_dir, "data")
     fold_directory = os.path.join(data_directory, "folds")
     vis_directory = os.path.join(data_directory, "vis")
     orig_data_directory = os.path.join(data_directory, "orig")
-    logger_class = Logger
+    logger_class = SummaryWriter
+
+    @classmethod
+    def combine(cls, base_path, *pathes):
+        new_path = os.path.join(base_path, *pathes)
+        return new_path
 
     @classmethod
     def _make_dir(cls, path):
@@ -32,6 +38,7 @@ class ProjectConfig:
             cls._make_dir(name)
         cls._make_dir(cls.vis_directory)
         cls._make_dir(cls.orig_data_directory)
+        cls._make_dir(cls.model_directory)
 
 
 class ExperimentConfig:

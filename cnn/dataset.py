@@ -8,6 +8,7 @@ from torchvision import transforms
 from scipy import ndimage, signal
 from base.dataset import BaseDataset, ToTensor
 from base.exceptions import ProjectException
+from skimage.transform import resize
 
 
 # scaler params computed on dataset
@@ -18,12 +19,14 @@ MED_Q = {'med1': -21.0596, 'med2': -26.3451, 'q1_1': -24.1442, 'q1_2': -28.3731,
 
 class Scale:
     def __init__(self, new_size):
-        self.new_size = new_size
+        self.h, self.w = new_size
 
     def __call__(self, item):
         image = item["inputs"]
-        c, h, w = image.shape
-        image = ndimage.zoom(image, (c, self.new_size, self.new_size), order=1)   # bilinear, 0 for nearest, 3 for cubic
+        image = np.transpose(image, (1, 2, 0))
+        image = resize(image, (self.h, self.w), order=0, mode='constant')
+        image = np.transpose(image, (2, 0, 1))
+        # image = ndimage.zoom(image, (c, self.h, self.w), order=0)   # bilinear, 0 for nearest, 3 for cubic
         item["inputs"] = image
         return item
 
@@ -213,7 +216,7 @@ class IcebergDataset(BaseDataset):
     def _get_simple_planes(self, image):
         plane_1 = image[0, :, :]
         plane_2 = image[1, :, :]
-        plane_3 = plane_1 + plane_2
+        plane_3 = (plane_1 + plane_2) / 2
         band_1 = (plane_1 - plane_1.mean()) / (plane_1.max() - plane_1.min())
         band_2 = (plane_2 - plane_2.mean()) / (plane_2.max() - plane_2.min())
         band_3 = (plane_3 - plane_3.mean()) / (plane_3.max() - plane_3.min())
