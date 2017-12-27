@@ -7,7 +7,7 @@ from torch.nn import functional as F
 from cnn.dataset import IcebergDataset, ToTensor, Flip, Rotate, Ravel
 from cnn.model import LeNet
 from cnn.inception import Inception
-from cnn.auto_encoder import IcebergEncoder, VariationalAutoEncoder
+from cnn.auto_encoder import VariationalAutoEncoder
 from cnn.aenc_dataset import AutoEncoderDataset
 from torch.utils.data import DataLoader, ConcatDataset
 from torchvision import transforms
@@ -54,18 +54,15 @@ class ModelTrainer:
 
     def train_all(self, config, epochs, transformations):
         main_logger = self.logger_class("../logs", erase_folder_content=False)
-        net = LeNet(self.num_feature_planes, config["conv"], config["fc1"], None, fold_number=None,
-                    gain=config["gain"], model_prefix="final")
+        net = Inception(self.num_feature_planes, config["conv"], 16, config["fc1"],
+                        momentum=config["momentum"], fold_number=None, gain=config["gain"], model_prefix="final_")
 
         if torch.cuda.is_available():
             net.cuda()
             self.loss_func.cuda()
-        train_sets = [
-            IcebergDataset(
-                "../data/all.npy", transform=t, top=self.train_top, add_feature_planes="complex"
-            ) for t in transformations
-        ]
-        big_train_set = ConcatDataset(train_sets)
+        big_train_set = IcebergDataset("../data/all.npy", transform=transformations, top=self.train_top,
+                                       add_feature_planes="complex")
+        # big_train_set = ConcatDataset(train_sets)
         val_ds = IcebergDataset("../data/folds/test_3.npy", transform=ToTensor(),
                                 top=self.test_top, add_feature_planes="complex")
 
@@ -77,6 +74,7 @@ class ModelTrainer:
         best = net.fit(optim, self.loss_func, train_loader, val_loader, epochs, logger=main_logger)
         print()
         print("Best was ", best)
+        return best
 
     def train_one_configuration(self, config, epochs, transformations):
         assert "gain" in config
@@ -161,8 +159,8 @@ def _train_classifiers():
         "fc2": 256, "train_batch_size": 512, "test_batch_size": 64, "momentum": 0.5
     }
     best_config_inception = {
-        "lr": 0.0001, "gain": 0.1, "conv": 48, "lambda": 0.05, "fc1": 64, "train_batch_size": 128,
-        "test_batch_size": 64, "momentum": 0.125
+        "lr": 0.0001, "gain": 0.1, "conv": 48, "lambda": 0.001, "fc1": 64, "train_batch_size": 192,
+        "test_batch_size": 64, "momentum": 0.1
     }
     # best_config_inception = {
     #     "lr": 0.0001, "gain": 0.1, "conv": 48, "lambda": 0.05, "fc1": 64, "train_batch_size": 128,
@@ -187,8 +185,8 @@ def _train_classifiers():
 
     trainer = ModelTrainer(num_planes, Inception, loss_func, n_folds, Logger, train_top=top, test_top=val_top)
     # loss_scores = trainer.random_search(100, parameter_grid, train_epochs=100, transformations=one_transform)
-    loss_scores = trainer.train_one_configuration(best_config_inception, 100, one_transform)
-    # trainer.train_all(best_config, 30, all_transformations)
+    # loss_scores = trainer.train_one_configuration(best_config_inception, 100, one_transform)
+    loss_scores = trainer.train_all(best_config_inception, 100, one_transform)
     print(loss_scores)
 
 

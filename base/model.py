@@ -222,7 +222,6 @@ class BaseBinaryClassifier(BaseModel):
         for i in range(iter_per_epoch):
             inputs, targets = self._get_inputs(iterator)
             probs, classes = self.predict(inputs, return_classes=True)
-            probs = self._cut_probabilities(probs)
             target_y = self.to_np(targets).squeeze()
             if loss_fn:
                 loss = loss_fn(probs, targets)
@@ -264,12 +263,6 @@ class BaseBinaryClassifier(BaseModel):
         self._reset_predictions_cache()
         return computed_metrics
 
-    @classmethod
-    def _cut_probabilities(cls, x):
-        x.data[x.data < 0.15] = 0
-        x.data[x.data > 0.85] = 1
-        return x
-
     def fit(self, optim, loss_fn, data_loader, validation_data_loader, num_epochs, logger):
         best_loss = float("inf")
         for e in progressbar(range(num_epochs)):
@@ -281,7 +274,6 @@ class BaseBinaryClassifier(BaseModel):
                 inputs, labels = self._get_inputs(data_iter)
 
                 predictions, classes = self.predict(inputs, return_classes=True)
-                predictions = self._cut_probabilities(predictions)
 
                 optim.zero_grad()
                 loss = loss_fn(predictions, labels)
