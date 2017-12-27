@@ -5,11 +5,10 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 
 
-def make_x(path1, path2):
-    data_inception = pd.read_csv(path1)
-    data_lenet = pd.read_csv(path2)
-    dt = data_inception.join(data_lenet["is_iceberg"], rsuffix="_2")
-    res = dt.as_matrix(["is_iceberg", "is_iceberg_2"])
+def make_x(*args):
+    frames = [pd.read_csv(p)["is_iceberg"] for p in args]
+    dt = pd.DataFrame(frames).transpose()
+    res = dt.as_matrix()
     return res
 
 
