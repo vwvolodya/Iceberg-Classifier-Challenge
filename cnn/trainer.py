@@ -54,15 +54,14 @@ class ModelTrainer:
 
     def train_all(self, config, epochs, transformations):
         main_logger = self.logger_class("../logs", erase_folder_content=False)
-        net = Inception(self.num_feature_planes, config["conv"], 16, config["fc1"],
-                        momentum=config["momentum"], fold_number=None, gain=config["gain"], model_prefix="final_")
+        net = self.model_class(self.num_feature_planes, config["conv"], config["fc1"], momentum=config["momentum"],
+                               fold_number=None, gain=config["gain"], model_prefix="final_")
 
         if torch.cuda.is_available():
             net.cuda()
             self.loss_func.cuda()
         big_train_set = IcebergDataset("../data/all.npy", transform=transformations, top=self.train_top,
                                        add_feature_planes="complex")
-        # big_train_set = ConcatDataset(train_sets)
         val_ds = IcebergDataset("../data/folds/test_3.npy", transform=ToTensor(),
                                 top=self.test_top, add_feature_planes="complex")
 
@@ -92,7 +91,7 @@ class ModelTrainer:
             main_logger = self.logger_class("../logs/%s" % f, erase_folder_content=True)
 
             model_prefix = str(hash(str(config)))
-            net = self.model_class(self.num_feature_planes, config["conv"], 16, config["fc1"],
+            net = self.model_class(self.num_feature_planes, config["conv"], config["fc1"],
                                    momentum=config["momentum"], fold_number=f, gain=config["gain"],
                                    model_prefix=model_prefix)
 
@@ -102,7 +101,6 @@ class ModelTrainer:
             train_set = IcebergDataset("../data/folds/train_%s.npy" % f, transform=transformations,
                                        top=self.train_top, add_feature_planes="complex")
 
-            # big_train_set = ConcatDataset(train_sets)
             val_ds = IcebergDataset("../data/folds/test_%s.npy" % f, transform=ToTensor(),
                                     top=self.test_top, add_feature_planes="complex")
 
@@ -155,8 +153,8 @@ def _train_classifiers():
         "fc1": [64, 128],
     }
     best_config = {
-        "lr": 0.0001, "gain": 0.01, "conv": (16, 24, 24, 16), "lambda": 0, "fc1": 16,
-        "fc2": 256, "train_batch_size": 512, "test_batch_size": 64, "momentum": 0.5
+        "lr": 0.0001, "gain": 0.1, "conv": (16, 24, 24, 16), "lambda": 0.01, "fc1": 16,
+        "fc2": 256, "train_batch_size": 128, "test_batch_size": 64, "momentum": 0.5
     }
     best_config_inception = {
         "lr": 0.0001, "gain": 0.1, "conv": 48, "lambda": 0.001, "fc1": 64, "train_batch_size": 192,
@@ -183,10 +181,10 @@ def _train_classifiers():
 
     loss_func = nn.BCELoss()
 
-    trainer = ModelTrainer(num_planes, Inception, loss_func, n_folds, Logger, train_top=top, test_top=val_top)
+    trainer = ModelTrainer(num_planes, LeNet, loss_func, n_folds, Logger, train_top=top, test_top=val_top)
     # loss_scores = trainer.random_search(100, parameter_grid, train_epochs=100, transformations=one_transform)
-    # loss_scores = trainer.train_one_configuration(best_config_inception, 100, one_transform)
-    loss_scores = trainer.train_all(best_config_inception, 100, one_transform)
+    # loss_scores = trainer.train_one_configuration(best_config, 100, one_transform)
+    loss_scores = trainer.train_all(best_config, 100, one_transform)
     print(loss_scores)
 
 
