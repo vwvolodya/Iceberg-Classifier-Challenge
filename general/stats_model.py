@@ -16,9 +16,9 @@ Y = data["label"].as_matrix()
 
 skf = StratifiedKFold(n_splits=4, random_state=41)
 models = []
-for train, test in skf.split(X, Y):
-    X_train, X_test = X[train], X[test]
-    y_train, y_test = Y[train], Y[test]
+for train_index, test_index in skf.split(X, Y):
+    X_train, X_test = X[train_index], X[test_index]
+    y_train, y_test = Y[train_index], Y[test_index]
 
     clf = XGBClassifier()
     clf.fit(X_train, y_train)
