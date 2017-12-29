@@ -10,6 +10,7 @@ def make_x(*args):
     frames = [pd.read_csv(p)["is_iceberg"] for p in args]
     dt = pd.DataFrame(frames).transpose()
     res = dt.as_matrix()
+    res = np.around(res)
     return res
 
 
@@ -36,8 +37,8 @@ for train, test in skf.split(x, y):
     X_train, X_test = x[train], x[test]
     y_train, y_test = y[train], y[test]
 
-    # model = LogisticRegression(random_state=24, verbose=0, max_iter=150)
-    model = SVC(random_state=20, probability=True)
+    model = LogisticRegression(random_state=44, verbose=0, max_iter=150)
+    # model = SVC(random_state=20, probability=True)
     model.fit(X_train, y_train)
     print("Fold #")
     print(evaluate(model, X_train, y_train))

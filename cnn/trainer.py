@@ -61,9 +61,9 @@ class ModelTrainer:
             net.cuda()
             self.loss_func.cuda()
         big_train_set = IcebergDataset("../data/all.npy", transform=transformations, top=self.train_top,
-                                       add_feature_planes="complex")
+                                       add_feature_planes="no")
         val_ds = IcebergDataset("../data/folds/test_3.npy", transform=ToTensor(),
-                                top=self.test_top, add_feature_planes="complex")
+                                top=self.test_top, add_feature_planes="no")
 
         train_loader = DataLoader(big_train_set, batch_size=config["train_batch_size"], num_workers=12,
                                   pin_memory=True, shuffle=True)
@@ -99,10 +99,10 @@ class ModelTrainer:
                 net.cuda()
                 self.loss_func.cuda()
             train_set = IcebergDataset("../data/folds/train_%s.npy" % f, transform=transformations,
-                                       top=self.train_top, add_feature_planes="complex")
+                                       top=self.train_top, add_feature_planes="no")
 
             val_ds = IcebergDataset("../data/folds/test_%s.npy" % f, transform=ToTensor(),
-                                    top=self.test_top, add_feature_planes="complex")
+                                    top=self.test_top, add_feature_planes="no")
 
             train_loader = DataLoader(train_set, batch_size=config["train_batch_size"], num_workers=12,
                                       pin_memory=True, shuffle=True)
@@ -167,7 +167,7 @@ def _train_classifiers():
     n_folds = 4
     top = None
     val_top = None
-    num_planes = 7
+    num_planes = 2
 
     one_transform = transforms.Compose(
         [
